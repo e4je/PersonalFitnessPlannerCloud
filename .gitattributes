@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+# Cross-platform scripts
+*.sh text eol=lf
+gradlew text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets
+*.jar binary
+*.png binary
+*.ico binary

@@ -1,0 +1,89 @@
+{
+  "schema_version": "2026.08.1",
+  "exercise_identity_rule": "重量历史只按精确 exercise_id；有 source_option_id 时还必须匹配该选项。替代动作不继承重量。",
+  "cases": [
+    {
+      "id": "all-working-sets-at-upper-bound-increases",
+      "input": {
+        "exercise_id": "40000000-0000-0000-0000-000000000011",
+        "current_weight_kg": 40.0,
+        "minimum_increment_kg": 2.5,
+        "rep_min": 8,
+        "rep_max": 10,
+        "consecutive_failed_sessions": 0,
+        "sets": [
+          { "reps": 10, "rir": 2, "quality": "GOOD", "pain": false },
+          { "reps": 10, "rir": 1, "quality": "GOOD", "pain": false },
+          { "reps": 10, "rir": 2, "quality": "GOOD", "pain": false }
+        ]
+      },
+      "expected": { "action": "INCREASE", "next_weight_kg": 42.5, "reason": "ALL_WORKING_SETS_AT_UPPER_BOUND" }
+    },
+    {
+      "id": "partial-target-holds",
+      "input": {
+        "exercise_id": "40000000-0000-0000-0000-000000000011",
+        "current_weight_kg": 40.0,
+        "minimum_increment_kg": 2.5,
+        "rep_min": 8,
+        "rep_max": 10,
+        "consecutive_failed_sessions": 0,
+        "sets": [
+          { "reps": 10, "rir": 2, "quality": "GOOD", "pain": false },
+          { "reps": 9, "rir": 2, "quality": "GOOD", "pain": false },
+          { "reps": 8, "rir": 2, "quality": "GOOD", "pain": false }
+        ]
+      },
+      "expected": { "action": "HOLD", "next_weight_kg": 40.0, "reason": "KEEP_BUILDING_REPS" }
+    },
+    {
+      "id": "two-consecutive-failures-decrease",
+      "input": {
+        "exercise_id": "40000000-0000-0000-0000-000000000011",
+        "current_weight_kg": 40.0,
+        "minimum_increment_kg": 2.5,
+        "rep_min": 8,
+        "rep_max": 10,
+        "consecutive_failed_sessions": 2,
+        "sets": [
+          { "reps": 8, "rir": 0, "quality": "FAIR", "pain": false },
+          { "reps": 8, "rir": 0, "quality": "FAIR", "pain": false },
+          { "reps": 8, "rir": 0, "quality": "FAIR", "pain": false }
+        ]
+      },
+      "expected": { "action": "DECREASE", "next_weight_kg": 37.5, "reason": "TWO_CONSECUTIVE_FAILURES" }
+    },
+    {
+      "id": "pain-never-increases",
+      "input": {
+        "exercise_id": "40000000-0000-0000-0000-000000000011",
+        "current_weight_kg": 40.0,
+        "minimum_increment_kg": 2.5,
+        "rep_min": 8,
+        "rep_max": 10,
+        "consecutive_failed_sessions": 0,
+        "sets": [
+          { "reps": 10, "rir": 2, "quality": "GOOD", "pain": true },
+          { "reps": 10, "rir": 2, "quality": "GOOD", "pain": false },
+          { "reps": 10, "rir": 2, "quality": "GOOD", "pain": false }
+        ]
+      },
+      "expected": { "action": "HOLD", "next_weight_kg": 40.0, "reason": "PAIN_REPORTED" }
+    },
+    {
+      "id": "alternative-does-not-inherit-primary-weight",
+      "history": [
+        {
+          "exercise_id": "40000000-0000-0000-0000-000000000011",
+          "source_option_id": "30000000-0000-0000-0000-000000000011",
+          "weight_kg": 40.0
+        }
+      ],
+      "query": {
+        "exercise_id": "40000000-0000-0000-0000-000000000013",
+        "source_option_id": "30000000-0000-0000-0000-000000000013"
+      },
+      "expected": { "latest_weight_kg": null }
+    }
+  ]
+}

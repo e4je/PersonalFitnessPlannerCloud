@@ -1,0 +1,4460 @@
+openapi: 3.1.0
+info:
+  title: Personal Fitness Planner API
+  summary: Cloud API for synchronized personal training plans and workout records
+  description: Server-authoritative exercise catalog and immutable training plan versions, with offline-friendly idempotent
+    workout synchronization.
+  version: 1.0.0
+paths:
+  /health/live:
+    get:
+      tags:
+      - health
+      summary: Process liveness
+      operationId: liveness_health_live_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Liveness Health Live Get
+  /health/ready:
+    get:
+      tags:
+      - health
+      summary: Database readiness
+      operationId: readiness_health_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Readiness Health Ready Get
+  /api/v1/auth/login:
+    post:
+      tags:
+      - authentication
+      summary: Login
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/refresh:
+    post:
+      tags:
+      - authentication
+      summary: Refresh
+      operationId: refresh_api_v1_auth_refresh_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - authentication
+      summary: Logout
+      operationId: logout_api_v1_auth_logout_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/LogoutRequest'
+              - type: 'null'
+              title: Payload
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/me:
+    get:
+      tags:
+      - authentication
+      summary: Me
+      operationId: me_api_v1_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+      security:
+      - HTTPBearer: []
+  /api/v1/bootstrap:
+    get:
+      tags:
+      - bootstrap
+      summary: Bootstrap
+      operationId: bootstrap_api_v1_bootstrap_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapOut'
+      security:
+      - HTTPBearer: []
+  /api/v1/plans/current:
+    get:
+      tags:
+      - plans
+      summary: Current Plan
+      operationId: current_plan_api_v1_plans_current_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanVersionOut'
+      security:
+      - HTTPBearer: []
+  /api/v1/plans/{plan_version_id}:
+    get:
+      tags:
+      - plans
+      summary: Plan Detail
+      operationId: plan_detail_api_v1_plans__plan_version_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: plan_version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plan Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanVersionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/exercises:
+    get:
+      tags:
+      - catalog
+      summary: List Exercises
+      operationId: list_exercises_api_v1_exercises_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 200
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExercisePage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/equipment:
+    get:
+      tags:
+      - catalog
+      summary: List Equipment
+      operationId: list_equipment_api_v1_equipment_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 200
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipmentPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/workout-sessions:
+    get:
+      tags:
+      - workout sessions
+      summary: List Workout Sessions
+      operationId: list_workout_sessions_api_v1_workout_sessions_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: local_date_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date From
+      - name: local_date_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date To
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Deleted
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkoutSessionPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - workout sessions
+      summary: Create Workout Session
+      operationId: create_workout_session_api_v1_workout_sessions_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkoutSessionUpsert'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkoutSessionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/workout-sessions/{workout_id}:
+    get:
+      tags:
+      - workout sessions
+      summary: Get Workout Session
+      operationId: get_workout_session_api_v1_workout_sessions__workout_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: workout_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workout Id
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Deleted
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkoutSessionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - workout sessions
+      summary: Patch Workout Session
+      operationId: patch_workout_session_api_v1_workout_sessions__workout_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: workout_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workout Id
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkoutSessionPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkoutSessionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - workout sessions
+      summary: Delete Workout Session
+      operationId: delete_workout_session_api_v1_workout_sessions__workout_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: workout_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workout Id
+      - name: expected_version
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 1
+          - type: 'null'
+          title: Expected Version
+      - name: If-Match
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: If-Match
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Idempotency-Key
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/readiness:
+    post:
+      tags:
+      - readiness
+      summary: Create Readiness
+      operationId: create_readiness_api_v1_readiness_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadinessUpsert'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - readiness
+      summary: List Readiness
+      operationId: list_readiness_api_v1_readiness_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 30
+          title: Limit
+      - name: local_date_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date From
+      - name: local_date_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date To
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Deleted
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/cardio-sessions:
+    post:
+      tags:
+      - cardio sessions
+      summary: Create Cardio Session
+      operationId: create_cardio_session_api_v1_cardio_sessions_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardioSessionUpsert'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardioSessionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - cardio sessions
+      summary: List Cardio Sessions
+      operationId: list_cardio_sessions_api_v1_cardio_sessions_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: local_date_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date From
+      - name: local_date_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date To
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Deleted
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardioSessionPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sync/changes:
+    get:
+      tags:
+      - synchronization
+      summary: Get Sync Changes
+      operationId: get_sync_changes_api_v1_sync_changes_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 200
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncChangesOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sync/batch:
+    post:
+      tags:
+      - synchronization
+      summary: Sync Batch
+      operationId: sync_batch_api_v1_sync_batch_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncBatchIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncBatchOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/recommendation/today:
+    get:
+      tags:
+      - recommendation
+      summary: Recommendation Today
+      operationId: recommendation_today_api_v1_recommendation_today_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Recommendation Today Api V1 Recommendation Today Get
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/equipment:
+    post:
+      tags:
+      - administration
+      summary: Create Equipment
+      operationId: create_equipment_api_v1_admin_equipment_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquipmentCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Create Equipment Api V1 Admin Equipment Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/equipment/{equipment_id}:
+    patch:
+      tags:
+      - administration
+      summary: Patch Equipment
+      operationId: patch_equipment_api_v1_admin_equipment__equipment_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: equipment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Equipment Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquipmentPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Patch Equipment Api V1 Admin Equipment  Equipment Id  Patch
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/exercises:
+    post:
+      tags:
+      - administration
+      summary: Create Exercise
+      operationId: create_exercise_api_v1_admin_exercises_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExerciseCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Create Exercise Api V1 Admin Exercises Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/exercises/{exercise_id}:
+    patch:
+      tags:
+      - administration
+      summary: Patch Exercise
+      operationId: patch_exercise_api_v1_admin_exercises__exercise_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: exercise_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Exercise Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExercisePatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Patch Exercise Api V1 Admin Exercises  Exercise Id  Patch
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/plans:
+    post:
+      tags:
+      - administration
+      summary: Create Plan
+      operationId: create_plan_api_v1_admin_plans_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Create Plan Api V1 Admin Plans Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/plans/{plan_id}/versions:
+    post:
+      tags:
+      - administration
+      summary: Create Version
+      operationId: create_version_api_v1_admin_plans__plan_id__versions_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plan Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanVersionCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Create Version Api V1 Admin Plans  Plan Id  Versions Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/plan-versions/{version_id}:
+    patch:
+      tags:
+      - administration
+      summary: Patch Version
+      operationId: patch_version_api_v1_admin_plan_versions__version_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Version Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanVersionPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Patch Version Api V1 Admin Plan Versions  Version Id  Patch
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/plan-versions/{version_id}/publish:
+    post:
+      tags:
+      - administration
+      summary: Publish Version
+      operationId: publish_version_api_v1_admin_plan_versions__version_id__publish_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Version Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/PlanVersionPublish'
+              - type: 'null'
+              title: Payload
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Publish Version Api V1 Admin Plan Versions  Version Id  Publish Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/assignments:
+    post:
+      tags:
+      - administration
+      summary: Assign Plan
+      operationId: assign_plan_api_v1_admin_assignments_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Assign Plan Api V1 Admin Assignments Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/audit-logs:
+    get:
+      tags:
+      - administration
+      summary: Audit Logs
+      operationId: audit_logs_api_v1_admin_audit_logs_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: action
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Action
+      - name: entity_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Entity Type
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/sync-status:
+    get:
+      tags:
+      - administration
+      summary: Sync Status
+      operationId: sync_status_api_v1_admin_sync_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatusResponse'
+      security:
+      - HTTPBearer: []
+components:
+  schemas:
+    AssignmentCreate:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: User Id
+        plan_version_id:
+          type: string
+          format: uuid
+          title: Plan Version Id
+        status:
+          type: string
+          maxLength: 32
+          minLength: 1
+          title: Status
+          default: active
+        starts_on:
+          type: string
+          format: date
+          title: Starts On
+        ends_on:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Ends On
+        assigned_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Assigned At
+        settings_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Settings Json
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+      additionalProperties: false
+      type: object
+      required:
+      - plan_version_id
+      - starts_on
+      title: AssignmentCreate
+    AuditLogPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/AuditLogResponse'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      required:
+      - items
+      title: AuditLogPage
+    AuditLogResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        actor_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Actor User Id
+        action:
+          type: string
+          title: Action
+        entity_type:
+          type: string
+          title: Entity Type
+        entity_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Entity Id
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+        ip_address:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ip Address
+        before_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Before Json
+        after_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: After Json
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - action
+      - entity_type
+      - created_at
+      title: AuditLogResponse
+    BootstrapOut:
+      properties:
+        user:
+          additionalProperties: true
+          type: object
+          title: User
+        permissions:
+          items:
+            type: string
+          type: array
+          title: Permissions
+        current_plan:
+          anyOf:
+          - $ref: '#/components/schemas/PlanVersionOut'
+          - type: 'null'
+        plan_version:
+          anyOf:
+          - $ref: '#/components/schemas/PlanVersionOut'
+          - type: 'null'
+        plan_versions:
+          items:
+            $ref: '#/components/schemas/PlanVersionOut'
+          type: array
+          title: Plan Versions
+        exercises:
+          items:
+            $ref: '#/components/schemas/ExerciseOut'
+          type: array
+          title: Exercises
+        equipment:
+          items:
+            $ref: '#/components/schemas/EquipmentOut'
+          type: array
+          title: Equipment
+        assignments:
+          items:
+            $ref: '#/components/schemas/PlanAssignmentOut'
+          type: array
+          title: Assignments
+        workout_sessions:
+          items:
+            $ref: '#/components/schemas/WorkoutSessionOut'
+          type: array
+          title: Workout Sessions
+        readiness:
+          items:
+            $ref: '#/components/schemas/ReadinessOut'
+          type: array
+          title: Readiness
+        cardio_sessions:
+          items:
+            $ref: '#/components/schemas/CardioSessionOut'
+          type: array
+          title: Cardio Sessions
+        recommendation:
+          additionalProperties: true
+          type: object
+          title: Recommendation
+        cursor:
+          type: string
+          title: Cursor
+        sync_cursor:
+          type: string
+          title: Sync Cursor
+        server_time:
+          type: string
+          format: date-time
+          title: Server Time
+        api_version:
+          type: string
+          title: Api Version
+        schema_version:
+          type: string
+          title: Schema Version
+      type: object
+      required:
+      - user
+      - cursor
+      - sync_cursor
+      - server_time
+      - api_version
+      - schema_version
+      title: BootstrapOut
+    CardioSessionOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        user_id:
+          type: string
+          format: uuid
+          title: User Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        source:
+          type: string
+          title: Source
+          default: android
+        source_device:
+          type: string
+          title: Source Device
+          default: android
+        client_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Version
+        local_date:
+          type: string
+          format: date
+          title: Local Date
+        activity:
+          type: string
+          title: Activity
+        activity_type:
+          type: string
+          title: Activity Type
+        duration_minutes:
+          type: integer
+          title: Duration Minutes
+        duration_seconds:
+          type: integer
+          title: Duration Seconds
+        distance_km:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Distance Km
+        distance_meters:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Distance Meters
+        average_heart_rate:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Average Heart Rate
+        calories:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Calories
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        metrics:
+          additionalProperties: true
+          type: object
+          title: Metrics
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - user_id
+      - local_date
+      - activity
+      - activity_type
+      - duration_minutes
+      - duration_seconds
+      - started_at
+      - version
+      - created_at
+      - updated_at
+      title: CardioSessionOut
+    CardioSessionPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/CardioSessionOut'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      title: CardioSessionPage
+    CardioSessionUpsert:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        source:
+          type: string
+          maxLength: 32
+          title: Source
+          default: android
+        source_device:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Source Device
+        client_version:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Client Version
+        local_date:
+          type: string
+          format: date
+          title: Local Date
+        activity:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Activity
+        activity_type:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Activity Type
+        duration_minutes:
+          anyOf:
+          - type: integer
+            maximum: 10080.0
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Duration Minutes
+        duration_seconds:
+          anyOf:
+          - type: integer
+            maximum: 604800.0
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Duration Seconds
+        distance_km:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Distance Km
+        distance_meters:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Distance Meters
+        average_heart_rate:
+          anyOf:
+          - type: integer
+            maximum: 300.0
+            minimum: 20.0
+          - type: 'null'
+          title: Average Heart Rate
+        calories:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Calories
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Notes
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        metrics:
+          additionalProperties: true
+          type: object
+          title: Metrics
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        expected_version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Expected Version
+      type: object
+      required:
+      - id
+      - local_date
+      - started_at
+      title: CardioSessionUpsert
+    EquipmentCreate:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        code:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Code
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Name
+        description:
+          type: string
+          maxLength: 4000
+          title: Description
+          default: ''
+        category:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Category
+          default: general
+        is_active:
+          type: boolean
+          title: Is Active
+          default: true
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+        brand:
+          anyOf:
+          - type: string
+            maxLength: 160
+          - type: 'null'
+          title: Brand
+        model:
+          anyOf:
+          - type: string
+            maxLength: 160
+          - type: 'null'
+          title: Model
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Notes
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: EquipmentCreate
+    EquipmentOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        code:
+          type: string
+          title: Code
+        name:
+          type: string
+          title: Name
+        category:
+          type: string
+          title: Category
+        brand:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Brand
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - code
+      - name
+      - category
+      - version
+      - created_at
+      - updated_at
+      title: EquipmentOut
+    EquipmentPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/EquipmentOut'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      title: EquipmentPage
+    EquipmentPatch:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        expected_version:
+          type: integer
+          minimum: 1.0
+          title: Expected Version
+        code:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Code
+        name:
+          anyOf:
+          - type: string
+            maxLength: 160
+            minLength: 1
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Description
+        category:
+          anyOf:
+          - type: string
+            maxLength: 80
+            minLength: 1
+          - type: 'null'
+          title: Category
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+        brand:
+          anyOf:
+          - type: string
+            maxLength: 160
+          - type: 'null'
+          title: Brand
+        model:
+          anyOf:
+          - type: string
+            maxLength: 160
+          - type: 'null'
+          title: Model
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Notes
+      additionalProperties: false
+      type: object
+      required:
+      - expected_version
+      title: EquipmentPatch
+    ExerciseAlternativeOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        exercise_id:
+          type: string
+          title: Exercise Id
+        alternative_exercise_id:
+          type: string
+          title: Alternative Exercise Id
+        sort_order:
+          type: integer
+          title: Sort Order
+          default: 0
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - exercise_id
+      - alternative_exercise_id
+      - version
+      - created_at
+      - updated_at
+      title: ExerciseAlternativeOut
+    ExerciseCreate:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        code:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Code
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Name
+        description:
+          type: string
+          maxLength: 8000
+          title: Description
+          default: ''
+        body_part:
+          anyOf:
+          - type: string
+            maxLength: 80
+          - type: 'null'
+          title: Body Part
+        movement_pattern:
+          anyOf:
+          - type: string
+            maxLength: 80
+          - type: 'null'
+          title: Movement Pattern
+        difficulty:
+          type: string
+          maxLength: 32
+          minLength: 1
+          title: Difficulty
+          default: beginner
+        is_unilateral:
+          type: boolean
+          title: Is Unilateral
+          default: false
+        is_active:
+          type: boolean
+          title: Is Active
+          default: true
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+        cues:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Cues
+        common_mistakes:
+          anyOf:
+          - type: string
+            maxLength: 8000
+          - type: 'null'
+          title: Common Mistakes
+        equipment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Equipment Id
+        equipment_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Equipment Ids
+        alternative_exercise_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Alternative Exercise Ids
+        equipment_name:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Equipment Name
+        prescription:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Prescription
+        alternatives:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Alternatives
+        default_sets:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Default Sets
+        rep_min:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Rep Min
+        rep_max:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Rep Max
+        rep_unit:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Rep Unit
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: ExerciseCreate
+    ExerciseOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        code:
+          type: string
+          title: Code
+        name:
+          type: string
+          title: Name
+        body_part:
+          type: string
+          title: Body Part
+          default: ''
+        equipment_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Equipment Id
+        default_sets:
+          type: integer
+          title: Default Sets
+          default: 0
+        rep_min:
+          type: integer
+          title: Rep Min
+          default: 0
+        rep_max:
+          type: integer
+          title: Rep Max
+          default: 0
+        rep_unit:
+          type: string
+          title: Rep Unit
+          default: reps
+        cues:
+          type: string
+          title: Cues
+          default: ''
+        common_mistakes:
+          type: string
+          title: Common Mistakes
+          default: ''
+        definition_version:
+          type: integer
+          title: Definition Version
+          default: 1
+        alternatives:
+          items:
+            $ref: '#/components/schemas/ExerciseAlternativeOut'
+          type: array
+          title: Alternatives
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - code
+      - name
+      - version
+      - created_at
+      - updated_at
+      title: ExerciseOut
+    ExercisePage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ExerciseOut'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      title: ExercisePage
+    ExercisePatch:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        expected_version:
+          type: integer
+          minimum: 1.0
+          title: Expected Version
+        code:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Code
+        name:
+          anyOf:
+          - type: string
+            maxLength: 160
+            minLength: 1
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+            maxLength: 8000
+          - type: 'null'
+          title: Description
+        body_part:
+          anyOf:
+          - type: string
+            maxLength: 80
+          - type: 'null'
+          title: Body Part
+        movement_pattern:
+          anyOf:
+          - type: string
+            maxLength: 80
+          - type: 'null'
+          title: Movement Pattern
+        difficulty:
+          anyOf:
+          - type: string
+            maxLength: 32
+            minLength: 1
+          - type: 'null'
+          title: Difficulty
+        is_unilateral:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Unilateral
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+        cues:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Cues
+        common_mistakes:
+          anyOf:
+          - type: string
+            maxLength: 8000
+          - type: 'null'
+          title: Common Mistakes
+        equipment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Equipment Id
+        equipment_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Equipment Ids
+        alternative_exercise_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Alternative Exercise Ids
+        equipment_name:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Equipment Name
+        prescription:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Prescription
+        alternatives:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Alternatives
+        default_sets:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Default Sets
+        rep_min:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Rep Min
+        rep_max:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Rep Max
+        rep_unit:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Rep Unit
+      additionalProperties: false
+      type: object
+      required:
+      - expected_version
+      title: ExercisePatch
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    LoginRequest:
+      properties:
+        email:
+          type: string
+          maxLength: 254
+          minLength: 3
+          title: Email
+        password:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Password
+        device_name:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Device Name
+      additionalProperties: false
+      type: object
+      required:
+      - email
+      - password
+      title: LoginRequest
+    LogoutRequest:
+      properties:
+        refresh_token:
+          anyOf:
+          - type: string
+            maxLength: 2048
+            minLength: 32
+          - type: 'null'
+          title: Refresh Token
+      additionalProperties: false
+      type: object
+      title: LogoutRequest
+    MessageResponse:
+      properties:
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - message
+      title: MessageResponse
+    PlanAssignmentOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        user_id:
+          type: string
+          title: User Id
+        plan_version_id:
+          type: string
+          title: Plan Version Id
+        start_local_date:
+          type: string
+          format: date
+          title: Start Local Date
+        end_local_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: End Local Date
+        is_active:
+          type: boolean
+          title: Is Active
+        status:
+          type: string
+          title: Status
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - user_id
+      - plan_version_id
+      - start_local_date
+      - is_active
+      - status
+      - version
+      - created_at
+      - updated_at
+      title: PlanAssignmentOut
+    PlanCreate:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Name
+        description:
+          type: string
+          maxLength: 8000
+          title: Description
+          default: ''
+        goal:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Goal
+          default: general_fitness
+        is_system:
+          type: boolean
+          title: Is System
+          default: false
+        is_active:
+          type: boolean
+          title: Is Active
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: PlanCreate
+    PlanDayInput:
+      properties:
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        plan_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Version Id
+        day_code:
+          type: string
+          maxLength: 16
+          minLength: 1
+          title: Day Code
+        name:
+          type: string
+          maxLength: 160
+          title: Name
+          default: ''
+        sort_order:
+          type: integer
+          minimum: 0.0
+          title: Sort Order
+          default: 0
+        notes:
+          type: string
+          maxLength: 8000
+          title: Notes
+          default: ''
+        slots:
+          items:
+            $ref: '#/components/schemas/PlanSlotInput'
+          type: array
+          title: Slots
+      type: object
+      required:
+      - day_code
+      title: PlanDayInput
+    PlanDayOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        plan_version_id:
+          type: string
+          title: Plan Version Id
+        code:
+          type: string
+          title: Code
+        name:
+          type: string
+          title: Name
+        sort_order:
+          type: integer
+          title: Sort Order
+        slots:
+          items:
+            $ref: '#/components/schemas/PlanSlotOut'
+          type: array
+          title: Slots
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - plan_version_id
+      - code
+      - name
+      - sort_order
+      - version
+      - created_at
+      - updated_at
+      title: PlanDayOut
+    PlanSlotInput:
+      properties:
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        plan_day_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Day Id
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Name
+        target_muscle_group_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Target Muscle Group Id
+        sort_order:
+          type: integer
+          minimum: 0.0
+          title: Sort Order
+          default: 0
+        notes:
+          type: string
+          maxLength: 8000
+          title: Notes
+          default: ''
+        selection_rule_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: string
+          - type: 'null'
+          title: Selection Rule Json
+        options:
+          items:
+            $ref: '#/components/schemas/PlanSlotOptionInput'
+          type: array
+          title: Options
+        common_mistakes:
+          anyOf:
+          - type: string
+            maxLength: 8000
+          - type: 'null'
+          title: Common Mistakes
+        seat_position:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: Seat Position
+        bench_angle:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: Bench Angle
+        machine_number:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: Machine Number
+      type: object
+      required:
+      - name
+      title: PlanSlotInput
+    PlanSlotOptionInput:
+      properties:
+        version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        plan_slot_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Slot Id
+        exercise_id:
+          type: string
+          format: uuid
+          title: Exercise Id
+        is_preferred:
+          type: boolean
+          title: Is Preferred
+          default: false
+        sort_order:
+          type: integer
+          minimum: 0.0
+          title: Sort Order
+          default: 0
+        set_count:
+          type: integer
+          maximum: 100.0
+          minimum: 1.0
+          title: Set Count
+          default: 1
+        reps_min:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Reps Min
+        reps_max:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Reps Max
+        duration_seconds_min:
+          anyOf:
+          - type: integer
+            maximum: 86400.0
+            minimum: 0.0
+          - type: 'null'
+          title: Duration Seconds Min
+        duration_seconds_max:
+          anyOf:
+          - type: integer
+            maximum: 86400.0
+            minimum: 0.0
+          - type: 'null'
+          title: Duration Seconds Max
+        rir_min:
+          anyOf:
+          - type: integer
+            maximum: 10.0
+            minimum: 0.0
+          - type: 'null'
+          title: Rir Min
+          default: 2
+        rir_max:
+          anyOf:
+          - type: integer
+            maximum: 10.0
+            minimum: 0.0
+          - type: 'null'
+          title: Rir Max
+          default: 3
+        is_per_side:
+          type: boolean
+          title: Is Per Side
+          default: false
+        prescription_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Prescription Json
+        equipment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Equipment Id
+        intro_set_count:
+          anyOf:
+          - type: integer
+            maximum: 100.0
+            minimum: 1.0
+          - type: 'null'
+          title: Intro Set Count
+        intro_weeks:
+          anyOf:
+          - type: integer
+            maximum: 52.0
+            minimum: 0.0
+          - type: 'null'
+          title: Intro Weeks
+        rep_unit:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Rep Unit
+        rest_seconds:
+          anyOf:
+          - type: integer
+            maximum: 3600.0
+            minimum: 0.0
+          - type: 'null'
+          title: Rest Seconds
+        exercise_name:
+          anyOf:
+          - type: string
+            maxLength: 160
+          - type: 'null'
+          title: Exercise Name
+        equipment:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Equipment
+      type: object
+      required:
+      - exercise_id
+      title: PlanSlotOptionInput
+    PlanSlotOptionOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        plan_slot_id:
+          type: string
+          title: Plan Slot Id
+        exercise_id:
+          type: string
+          title: Exercise Id
+        equipment_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Equipment Id
+        is_preferred:
+          type: boolean
+          title: Is Preferred
+        sort_order:
+          type: integer
+          title: Sort Order
+        set_count:
+          type: integer
+          title: Set Count
+        rep_min:
+          type: integer
+          title: Rep Min
+          default: 0
+        rep_max:
+          type: integer
+          title: Rep Max
+          default: 0
+        rep_unit:
+          type: string
+          title: Rep Unit
+          default: reps
+        duration_seconds_min:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Seconds Min
+        duration_seconds_max:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Seconds Max
+        rir_min:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Rir Min
+        rir_max:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Rir Max
+        is_per_side:
+          type: boolean
+          title: Is Per Side
+          default: false
+        prescription_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Prescription Text
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - plan_slot_id
+      - exercise_id
+      - is_preferred
+      - sort_order
+      - set_count
+      - version
+      - created_at
+      - updated_at
+      title: PlanSlotOptionOut
+    PlanSlotOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        plan_day_id:
+          type: string
+          title: Plan Day Id
+        position:
+          type: integer
+          title: Position
+        body_part:
+          type: string
+          title: Body Part
+        cues:
+          type: string
+          title: Cues
+          default: ''
+        options:
+          items:
+            $ref: '#/components/schemas/PlanSlotOptionOut'
+          type: array
+          title: Options
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - plan_day_id
+      - position
+      - body_part
+      - version
+      - created_at
+      - updated_at
+      title: PlanSlotOut
+    PlanVersionCreate:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        plan_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Id
+        plan_name:
+          anyOf:
+          - type: string
+            maxLength: 160
+          - type: 'null'
+          title: Plan Name
+        version_number:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Version Number
+        status:
+          anyOf:
+          - type: string
+            maxLength: 16
+          - type: 'null'
+          title: Status
+        base_plan_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Base Plan Version Id
+        weekly_frequency:
+          type: integer
+          maximum: 7.0
+          minimum: 1.0
+          title: Weekly Frequency
+          default: 3
+        min_rest_days:
+          type: integer
+          maximum: 14.0
+          minimum: 0.0
+          title: Min Rest Days
+          default: 1
+        fatigue_threshold:
+          type: integer
+          maximum: 10.0
+          minimum: 1.0
+          title: Fatigue Threshold
+          default: 8
+        initial_reduced_weeks:
+          type: integer
+          maximum: 52.0
+          minimum: 0.0
+          title: Initial Reduced Weeks
+          default: 2
+        initial_set_count:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Initial Set Count
+          default: 2
+        config_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - items: {}
+            type: array
+          - type: string
+          - type: integer
+          - type: number
+          - type: boolean
+          - type: 'null'
+          title: Config Json
+        changelog:
+          type: string
+          maxLength: 8000
+          title: Changelog
+          default: ''
+        days:
+          items:
+            $ref: '#/components/schemas/PlanDayInput'
+          type: array
+          title: Days
+      additionalProperties: false
+      type: object
+      title: PlanVersionCreate
+    PlanVersionOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        plan_id:
+          type: string
+          title: Plan Id
+        plan_name:
+          type: string
+          title: Plan Name
+        version_number:
+          type: integer
+          title: Version Number
+        status:
+          type: string
+          title: Status
+        published_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Published At
+        snapshot_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snapshot Json
+        weekly_frequency:
+          type: integer
+          title: Weekly Frequency
+        min_rest_days:
+          type: integer
+          title: Min Rest Days
+        fatigue_threshold:
+          type: integer
+          title: Fatigue Threshold
+        initial_reduced_weeks:
+          type: integer
+          title: Initial Reduced Weeks
+        initial_set_count:
+          type: integer
+          title: Initial Set Count
+        rules:
+          additionalProperties: true
+          type: object
+          title: Rules
+        days:
+          items:
+            $ref: '#/components/schemas/PlanDayOut'
+          type: array
+          title: Days
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - plan_id
+      - plan_name
+      - version_number
+      - status
+      - weekly_frequency
+      - min_rest_days
+      - fatigue_threshold
+      - initial_reduced_weeks
+      - initial_set_count
+      - version
+      - created_at
+      - updated_at
+      title: PlanVersionOut
+    PlanVersionPatch:
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1.0
+          title: Expected Version
+        weekly_frequency:
+          anyOf:
+          - type: integer
+            maximum: 7.0
+            minimum: 1.0
+          - type: 'null'
+          title: Weekly Frequency
+        min_rest_days:
+          anyOf:
+          - type: integer
+            maximum: 14.0
+            minimum: 0.0
+          - type: 'null'
+          title: Min Rest Days
+        fatigue_threshold:
+          anyOf:
+          - type: integer
+            maximum: 10.0
+            minimum: 1.0
+          - type: 'null'
+          title: Fatigue Threshold
+        initial_reduced_weeks:
+          anyOf:
+          - type: integer
+            maximum: 52.0
+            minimum: 0.0
+          - type: 'null'
+          title: Initial Reduced Weeks
+        initial_set_count:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Initial Set Count
+        config_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - items: {}
+            type: array
+          - type: string
+          - type: integer
+          - type: number
+          - type: boolean
+          - type: 'null'
+          title: Config Json
+        changelog:
+          anyOf:
+          - type: string
+            maxLength: 8000
+          - type: 'null'
+          title: Changelog
+        days:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/PlanDayInput'
+            type: array
+          - type: 'null'
+          title: Days
+      additionalProperties: false
+      type: object
+      required:
+      - expected_version
+      title: PlanVersionPatch
+    PlanVersionPublish:
+      properties:
+        expected_version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Expected Version
+      additionalProperties: false
+      type: object
+      title: PlanVersionPublish
+    ReadinessOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        user_id:
+          type: string
+          format: uuid
+          title: User Id
+        local_date:
+          type: string
+          format: date
+          title: Local Date
+        fatigue_score:
+          type: integer
+          title: Fatigue Score
+        sleep_quality:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sleep Quality
+        pain_notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pain Notes
+        soreness:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Soreness
+        stress:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Stress
+        motivation:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Motivation
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        metrics:
+          additionalProperties: true
+          type: object
+          title: Metrics
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - user_id
+      - local_date
+      - fatigue_score
+      - version
+      - created_at
+      - updated_at
+      title: ReadinessOut
+    ReadinessPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ReadinessOut'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      title: ReadinessPage
+    ReadinessUpsert:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        local_date:
+          type: string
+          format: date
+          title: Local Date
+        fatigue_score:
+          type: integer
+          maximum: 10.0
+          minimum: 1.0
+          title: Fatigue Score
+        sleep_quality:
+          anyOf:
+          - type: integer
+            maximum: 5.0
+            minimum: 1.0
+          - type: 'null'
+          title: Sleep Quality
+        pain_notes:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Pain Notes
+        soreness:
+          anyOf:
+          - type: integer
+            maximum: 5.0
+            minimum: 1.0
+          - type: 'null'
+          title: Soreness
+        stress:
+          anyOf:
+          - type: integer
+            maximum: 5.0
+            minimum: 1.0
+          - type: 'null'
+          title: Stress
+        motivation:
+          anyOf:
+          - type: integer
+            maximum: 5.0
+            minimum: 1.0
+          - type: 'null'
+          title: Motivation
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Notes
+        metrics:
+          additionalProperties: true
+          type: object
+          title: Metrics
+        expected_version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Expected Version
+      type: object
+      required:
+      - id
+      - local_date
+      - fatigue_score
+      title: ReadinessUpsert
+    RefreshRequest:
+      properties:
+        refresh_token:
+          type: string
+          maxLength: 2048
+          minLength: 32
+          title: Refresh Token
+      additionalProperties: false
+      type: object
+      required:
+      - refresh_token
+      title: RefreshRequest
+    SyncBatchIn:
+      properties:
+        batch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: string
+          title: Batch Id
+        sent_at:
+          type: string
+          format: date-time
+          title: Sent At
+        operations:
+          items:
+            $ref: '#/components/schemas/SyncOperationIn'
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Operations
+      type: object
+      required:
+      - batch_id
+      - sent_at
+      - operations
+      title: SyncBatchIn
+    SyncBatchItemResult:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_outbox_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Outbox Id
+        status:
+          type: string
+          title: Status
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        server_version:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Server Version
+        server_copy:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Server Copy
+      type: object
+      required:
+      - id
+      - status
+      title: SyncBatchItemResult
+    SyncBatchOut:
+      properties:
+        batch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: string
+          - type: 'null'
+          title: Batch Id
+        results:
+          items:
+            $ref: '#/components/schemas/SyncBatchItemResult'
+          type: array
+          title: Results
+        accepted_outbox_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Accepted Outbox Ids
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      type: object
+      title: SyncBatchOut
+    SyncChangeOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        entity_type:
+          type: string
+          title: Entity Type
+        entity_id:
+          type: string
+          format: uuid
+          title: Entity Id
+        operation:
+          type: string
+          title: Operation
+          default: UPSERT
+        version:
+          type: integer
+          title: Version
+          default: 1
+        payload:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Payload
+        changed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Changed At
+      type: object
+      required:
+      - id
+      - entity_type
+      - entity_id
+      title: SyncChangeOut
+    SyncChangesOut:
+      properties:
+        changes:
+          items:
+            $ref: '#/components/schemas/SyncChangeOut'
+          type: array
+          title: Changes
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+        full_resync_required:
+          type: boolean
+          title: Full Resync Required
+          default: false
+      type: object
+      title: SyncChangesOut
+    SyncOperationIn:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_outbox_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Outbox Id
+        idempotency_key:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Idempotency Key
+        entity_type:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Entity Type
+        entity_id:
+          type: string
+          format: uuid
+          title: Entity Id
+        operation:
+          type: string
+          maxLength: 32
+          minLength: 1
+          title: Operation
+        payload:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Payload
+      type: object
+      required:
+      - id
+      - idempotency_key
+      - entity_type
+      - entity_id
+      - operation
+      title: SyncOperationIn
+    SyncStatusResponse:
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          title: Server Time
+        status:
+          type: string
+          title: Status
+          default: healthy
+        latest_sequence:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Latest Sequence
+        changes_last_24_hours:
+          type: integer
+          title: Changes Last 24 Hours
+          default: 0
+        pending_operations:
+          type: integer
+          title: Pending Operations
+          default: 0
+        failed_operations:
+          type: integer
+          title: Failed Operations
+          default: 0
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+      type: object
+      required:
+      - server_time
+      title: SyncStatusResponse
+    TokenResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+        refresh_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refresh Token
+        token_type:
+          type: string
+          title: Token Type
+          default: Bearer
+        expires_in:
+          type: integer
+          title: Expires In
+        expires_at:
+          type: integer
+          title: Expires At
+      type: object
+      required:
+      - access_token
+      - expires_in
+      - expires_at
+      title: TokenResponse
+    UserResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        email:
+          type: string
+          title: Email
+        username:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Username
+        display_name:
+          type: string
+          title: Display Name
+        timezone:
+          type: string
+          title: Timezone
+        weight_unit:
+          type: string
+          title: Weight Unit
+          default: KG
+        is_active:
+          type: boolean
+          title: Is Active
+        is_superuser:
+          type: boolean
+          title: Is Superuser
+          default: false
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+        permissions:
+          items:
+            type: string
+          type: array
+          title: Permissions
+        version:
+          type: integer
+          title: Version
+          default: 1
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - email
+      - display_name
+      - timezone
+      - is_active
+      title: UserResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WorkoutSessionOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        user_id:
+          type: string
+          format: uuid
+          title: User Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        source:
+          type: string
+          title: Source
+          default: android
+        source_device:
+          type: string
+          title: Source Device
+          default: android
+        client_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Version
+        plan_assignment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Assignment Id
+        plan_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Version Id
+        plan_day_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Day Id
+        plan_day_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Plan Day Code
+        local_date:
+          type: string
+          format: date
+          title: Local Date
+        timezone:
+          type: string
+          title: Timezone
+          default: UTC
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        status:
+          type: string
+          title: Status
+          default: IN_PROGRESS
+        is_full_body:
+          type: boolean
+          title: Is Full Body
+          default: true
+        training_week:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Training Week
+        ab_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ab State
+        plan_snapshot_json:
+          type: string
+          title: Plan Snapshot Json
+          default: '{}'
+        idempotency_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Idempotency Key
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        sets:
+          items:
+            $ref: '#/components/schemas/WorkoutSetOut'
+          type: array
+          title: Sets
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - user_id
+      - local_date
+      - started_at
+      - version
+      - created_at
+      - updated_at
+      title: WorkoutSessionOut
+    WorkoutSessionPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/WorkoutSessionOut'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      title: WorkoutSessionPage
+    WorkoutSessionPatch:
+      properties:
+        id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        source:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Source
+        source_device:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Source Device
+        client_version:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Client Version
+        plan_assignment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Assignment Id
+        plan_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Version Id
+        plan_day_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Day Id
+        plan_day_code:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Plan Day Code
+        local_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Local Date
+        timezone:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Timezone
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        status:
+          anyOf:
+          - type: string
+            maxLength: 32
+            minLength: 1
+          - type: 'null'
+          title: Status
+        is_full_body:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Full Body
+        training_week:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Training Week
+        ab_state:
+          anyOf:
+          - type: string
+            maxLength: 16
+          - type: 'null'
+          title: Ab State
+        plan_snapshot_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Plan Snapshot Json
+        metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 10000
+          - type: 'null'
+          title: Notes
+        sets:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/WorkoutSetUpsert'
+            type: array
+            maxItems: 1000
+          - type: 'null'
+          title: Sets
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        expected_version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Expected Version
+      type: object
+      title: WorkoutSessionPatch
+    WorkoutSessionUpsert:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        source:
+          type: string
+          maxLength: 32
+          title: Source
+          default: android
+        source_device:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Source Device
+        client_version:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Client Version
+        plan_assignment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Assignment Id
+        plan_version_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Version Id
+        plan_day_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Day Id
+        plan_day_code:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Plan Day Code
+        local_date:
+          type: string
+          format: date
+          title: Local Date
+        timezone:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Timezone
+          default: UTC
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        status:
+          type: string
+          maxLength: 32
+          minLength: 1
+          title: Status
+          default: IN_PROGRESS
+        is_full_body:
+          type: boolean
+          title: Is Full Body
+          default: true
+        training_week:
+          anyOf:
+          - type: integer
+            maximum: 10000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Training Week
+        ab_state:
+          anyOf:
+          - type: string
+            maxLength: 16
+          - type: 'null'
+          title: Ab State
+        plan_snapshot_json:
+          type: string
+          title: Plan Snapshot Json
+          default: '{}'
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 10000
+          - type: 'null'
+          title: Notes
+        sets:
+          items:
+            $ref: '#/components/schemas/WorkoutSetUpsert'
+          type: array
+          maxItems: 1000
+          title: Sets
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        expected_version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Expected Version
+      type: object
+      required:
+      - id
+      - local_date
+      - started_at
+      title: WorkoutSessionUpsert
+    WorkoutSetOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        session_id:
+          type: string
+          format: uuid
+          title: Session Id
+        plan_slot_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Slot Id
+        source_plan_slot_option_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Source Plan Slot Option Id
+        exercise_id:
+          type: string
+          format: uuid
+          title: Exercise Id
+        equipment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Equipment Id
+        set_number:
+          type: integer
+          title: Set Number
+        weight_kg:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Weight Kg
+        reps:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Reps
+        duration_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Seconds
+        distance_meters:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Distance Meters
+        is_warmup:
+          type: boolean
+          title: Is Warmup
+          default: false
+        set_type:
+          type: string
+          title: Set Type
+          default: WORKING
+        rir:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Rir
+        quality:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Quality
+        pain:
+          type: boolean
+          title: Pain
+          default: false
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        completed:
+          type: boolean
+          title: Completed
+          default: false
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+      type: object
+      required:
+      - id
+      - session_id
+      - exercise_id
+      - set_number
+      - version
+      - created_at
+      - updated_at
+      title: WorkoutSetOut
+    WorkoutSetUpsert:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        plan_slot_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Plan Slot Id
+        source_plan_slot_option_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Source Plan Slot Option Id
+        exercise_id:
+          type: string
+          format: uuid
+          title: Exercise Id
+        equipment_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Equipment Id
+        set_number:
+          type: integer
+          maximum: 1000.0
+          minimum: 1.0
+          title: Set Number
+        weight_kg:
+          anyOf:
+          - type: number
+            maximum: 100000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Weight Kg
+        reps:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Reps
+        duration_seconds:
+          anyOf:
+          - type: integer
+            maximum: 604800.0
+            minimum: 0.0
+          - type: 'null'
+          title: Duration Seconds
+        distance_meters:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: Distance Meters
+        is_warmup:
+          type: boolean
+          title: Is Warmup
+          default: false
+        set_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Set Type
+        rir:
+          anyOf:
+          - type: integer
+            maximum: 10.0
+            minimum: 0.0
+          - type: 'null'
+          title: Rir
+        quality:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Quality
+        pain:
+          type: boolean
+          title: Pain
+          default: false
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 4000
+          - type: 'null'
+          title: Notes
+        completed:
+          type: boolean
+          title: Completed
+          default: false
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        deleted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted At
+        expected_version:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Expected Version
+      type: object
+      required:
+      - id
+      - exercise_id
+      - set_number
+      title: WorkoutSetUpsert
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer

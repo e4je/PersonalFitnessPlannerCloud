@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app import __version__
+from app.api import admin, auth, bootstrap, cardio, catalog, health, plans, readiness, recommendation, sync, workouts
+from app.core.config import settings
+from app.core.logging import configure_logging
+from app.core.middleware import ProductionHTTPSMiddleware, RequestContextMiddleware
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    configure_logging()
+    yield
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.api_version,
+    summary="Cloud API for synchronized personal training plans and workout records",
+    description=(
+        "Server-authoritative exercise catalog and immutable training plan versions, "
+        "with offline-friendly idempotent workout synchronization."
+    ),
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
+
+app.add_middleware(RequestContextMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "ETag"],
+)
+if settings.environment == "production":
+    app.add_middleware(ProductionHTTPSMiddleware)
+
+app.include_router(health.router)
+for api_router in (
+    auth.router,
+    bootstrap.router,
+    plans.router,
+    catalog.router,
+    workouts.router,
+    readiness.router,
+    cardio.router,
+    sync.router,
+    recommendation.router,
+    admin.router,
+):
+    app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+
+@app.get("/", include_in_schema=False)
+def root() -> dict[str, str]:
+    return {
+        "name": settings.app_name,
+        "service_version": __version__,
+        "api_version": settings.api_version,
+        "docs": "/docs",
+    }

@@ -1,0 +1,5 @@
+<Project>
+  <Target Name="RejectNonWindowsDesktopBuild" BeforeTargets="Build" Condition="'$(UseWPF)' == 'true' and '$(OS)' != 'Windows_NT'">
+    <Error Text="PersonalFitnessPlanner WPF 客户端只能在 Windows 上构建。" />
+  </Target>
+</Project>

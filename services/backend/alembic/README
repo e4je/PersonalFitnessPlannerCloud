@@ -1,0 +1,2 @@
+Single-database Alembic environment for the Personal Fitness Planner backend.
+The database URL is loaded from app.core.config.Settings / DATABASE_URL.

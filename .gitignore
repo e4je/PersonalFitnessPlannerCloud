@@ -1,0 +1,58 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+**/*.egg-info/
+**/.coverage
+**/htmlcov/
+
+# Android / Gradle
+**/.gradle/
+**/.gradle-user-home/
+**/.gradle-test-cache/
+**/.kotlin/
+**/local.properties
+apps/android/app/build/
+apps/android/build/
+
+# .NET / Visual Studio
+apps/windows/.packages/
+apps/windows/**/bin/
+apps/windows/**/obj/
+apps/windows/TestResults/
+apps/windows/.vs/
+*.user
+*.suo
+
+# Runtime data and generated delivery artifacts
+services/backend/backups/*
+!services/backend/backups/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
+apps/android/artifacts/
+apps/windows/artifacts/
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/*.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

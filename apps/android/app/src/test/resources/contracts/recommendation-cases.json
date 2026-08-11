@@ -1,0 +1,81 @@
+{
+  "schema_version": "2026.08.1",
+  "date_semantics": "所有日期均为用户 IANA 时区中的 local_date；周从周一开始。",
+  "cases": [
+    {
+      "id": "first-strength-recommends-a",
+      "today": "2026-08-03",
+      "completed_workouts": [],
+      "fatigue_score": 3,
+      "weekly_limit": 3,
+      "expected": { "session": "A", "next_strength_day": "A", "reason": "FIRST_STRENGTH_SESSION" }
+    },
+    {
+      "id": "completed-a-recommends-b",
+      "today": "2026-08-05",
+      "completed_workouts": [
+        { "local_date": "2026-08-03", "plan_code": "A", "is_full_body": true }
+      ],
+      "fatigue_score": 4,
+      "weekly_limit": 3,
+      "expected": { "session": "B", "next_strength_day": "B", "reason": "ALTERNATE_AFTER_A" }
+    },
+    {
+      "id": "missed-calendar-day-keeps-sequence",
+      "today": "2026-08-10",
+      "completed_workouts": [
+        { "local_date": "2026-08-03", "plan_code": "A", "is_full_body": true }
+      ],
+      "fatigue_score": 4,
+      "weekly_limit": 3,
+      "expected": { "session": "B", "next_strength_day": "B", "reason": "ALTERNATE_AFTER_A" }
+    },
+    {
+      "id": "yesterday-full-body-needs-recovery",
+      "today": "2026-08-06",
+      "completed_workouts": [
+        { "local_date": "2026-08-05", "plan_code": "A", "is_full_body": true }
+      ],
+      "fatigue_score": 4,
+      "weekly_limit": 3,
+      "expected": { "session": "RECOVERY", "next_strength_day": "B", "reason": "CONSECUTIVE_FULL_BODY_PROTECTION" }
+    },
+    {
+      "id": "weekly-limit-three",
+      "today": "2026-08-09",
+      "completed_workouts": [
+        { "local_date": "2026-08-03", "plan_code": "A", "is_full_body": true },
+        { "local_date": "2026-08-05", "plan_code": "B", "is_full_body": true },
+        { "local_date": "2026-08-07", "plan_code": "A", "is_full_body": true }
+      ],
+      "fatigue_score": 4,
+      "weekly_limit": 3,
+      "expected": { "session": "RECOVERY", "next_strength_day": "B", "reason": "WEEKLY_LIMIT_REACHED" }
+    },
+    {
+      "id": "fatigue-nine-needs-recovery",
+      "today": "2026-08-05",
+      "completed_workouts": [],
+      "fatigue_score": 9,
+      "weekly_limit": 3,
+      "expected": { "session": "RECOVERY", "next_strength_day": "A", "reason": "HIGH_FATIGUE" }
+    },
+    {
+      "id": "adaptation-week-two-caps-sets",
+      "training_week": 2,
+      "prescribed_sets": 3,
+      "adaptation_weeks": 2,
+      "adaptation_sets": 2,
+      "expected": { "effective_sets": 2 }
+    },
+    {
+      "id": "new-version-only-affects-new-workouts",
+      "existing_workout": { "plan_version_id": "10000000-0000-0000-0000-000000000001" },
+      "new_assignment": { "plan_version_id": "10000000-0000-0000-0000-000000000002" },
+      "expected": {
+        "existing_workout_plan_version_id": "10000000-0000-0000-0000-000000000001",
+        "next_workout_plan_version_id": "10000000-0000-0000-0000-000000000002"
+      }
+    }
+  ]
+}

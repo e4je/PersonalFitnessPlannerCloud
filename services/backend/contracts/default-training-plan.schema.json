@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personalfitnessplanner.local/contracts/default-training-plan.schema.json",
+  "title": "Personal Fitness Planner default training plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "contract_version",
+    "plan_code",
+    "plan_id",
+    "plan_version_id",
+    "version",
+    "status",
+    "name",
+    "description",
+    "goal",
+    "cycle",
+    "weekly_strength_target",
+    "minimum_rest_days",
+    "fatigue_threshold",
+    "adaptation_weeks",
+    "adaptation_sets",
+    "target_rir",
+    "selection_rule",
+    "published_at",
+    "days"
+  ],
+  "properties": {
+    "$schema": { "const": "./default-training-plan.schema.json" },
+    "schema_version": { "type": "string", "minLength": 1 },
+    "contract_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "plan_code": { "const": "beginner_recomp_ab_v1" },
+    "plan_id": { "$ref": "#/$defs/uuid" },
+    "plan_version_id": { "$ref": "#/$defs/uuid" },
+    "version": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["published"] },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "goal": { "type": "string", "minLength": 1 },
+    "cycle": {
+      "type": "array",
+      "prefixItems": [{ "const": "A" }, { "const": "B" }],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "weekly_strength_target": { "type": "integer", "minimum": 1, "maximum": 7 },
+    "minimum_rest_days": { "type": "integer", "minimum": 0, "maximum": 14 },
+    "fatigue_threshold": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "adaptation_weeks": { "type": "integer", "minimum": 0, "maximum": 52 },
+    "adaptation_sets": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "target_rir": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "integer", "minimum": 0, "maximum": 10 },
+        { "type": "integer", "minimum": 0, "maximum": 10 }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "selection_rule": { "type": "string", "minLength": 1 },
+    "published_at": { "type": "string", "format": "date-time" },
+    "days": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/day" }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "day": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_id", "code", "name", "order", "slots"],
+      "properties": {
+        "day_id": { "$ref": "#/$defs/uuid" },
+        "code": { "enum": ["A", "B"] },
+        "name": { "type": "string", "minLength": 1 },
+        "order": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "slots": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/slot" }
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id",
+        "slot_code",
+        "order",
+        "muscle_group",
+        "primary_exercise_id",
+        "sets",
+        "rep_min",
+        "rep_max",
+        "rep_unit",
+        "rest_seconds",
+        "cues",
+        "common_mistakes",
+        "adaptation_sets",
+        "enabled",
+        "options"
+      ],
+      "properties": {
+        "slot_id": { "$ref": "#/$defs/uuid" },
+        "slot_code": { "type": "string", "pattern": "^[AB][0-9]{2}$" },
+        "order": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "muscle_group": { "type": "string", "minLength": 1 },
+        "primary_exercise_id": { "$ref": "#/$defs/uuid" },
+        "sets": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "rep_min": { "type": "integer", "minimum": 0 },
+        "rep_max": { "type": "integer", "minimum": 1 },
+        "rep_unit": { "type": "string", "minLength": 1 },
+        "rest_seconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "cues": { "type": "string", "minLength": 1 },
+        "common_mistakes": { "type": "string" },
+        "adaptation_sets": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "enabled": { "type": "boolean" },
+        "seat_position": { "type": "string" },
+        "bench_angle": { "type": "string" },
+        "machine_number": { "type": "string" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/option" }
+        }
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "option_id",
+        "exercise_id",
+        "exercise_name",
+        "equipment_id",
+        "equipment",
+        "is_primary",
+        "order",
+        "sets",
+        "rep_min",
+        "rep_max",
+        "rep_unit",
+        "rest_seconds",
+        "rir_min",
+        "rir_max",
+        "per_side",
+        "enabled"
+      ],
+      "properties": {
+        "option_id": { "$ref": "#/$defs/uuid" },
+        "exercise_id": { "$ref": "#/$defs/uuid" },
+        "exercise_name": { "type": "string", "minLength": 1 },
+        "equipment_id": { "$ref": "#/$defs/uuid" },
+        "equipment": { "type": "string", "minLength": 1 },
+        "is_primary": { "type": "boolean" },
+        "order": { "type": "integer", "minimum": 1 },
+        "sets": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "rep_min": { "type": "integer", "minimum": 0 },
+        "rep_max": { "type": "integer", "minimum": 1 },
+        "rep_unit": { "type": "string", "minLength": 1 },
+        "rest_seconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "rir_min": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "rir_max": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "per_side": { "type": "boolean" },
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

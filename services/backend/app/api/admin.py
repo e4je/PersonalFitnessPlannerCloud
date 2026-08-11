@@ -1,0 +1,840 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, NoReturn
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.api.dependencies import get_current_user, get_db, require_roles
+from app.db.base import utcnow, uuid4_str
+from app.models import (
+    AuditLog,
+    Equipment,
+    Exercise,
+    ExerciseAlternative,
+    ExerciseCue,
+    ExerciseEquipment,
+    PlanAssignment,
+    PlanVersion,
+    SyncChange,
+    TrainingPlan,
+    User,
+)
+from app.repositories.common import (
+    EntityNotFoundError,
+    OptimisticLockError,
+    add_audit_log,
+    add_sync_change,
+    entity_dict,
+    optimistic_patch,
+    require_active,
+)
+from app.schemas.admin import (
+    AssignmentCreate,
+    AuditLogPage,
+    AuditLogResponse,
+    EquipmentCreate,
+    EquipmentPatch,
+    ExerciseCreate,
+    ExercisePatch,
+    PlanCreate,
+    PlanVersionCreate,
+    PlanVersionPatch,
+    PlanVersionPublish,
+    SyncStatusResponse,
+)
+from app.services.plans import (
+    PlanValidationError,
+    PublishedPlanImmutableError,
+    create_assignment,
+    create_plan_version,
+    patch_plan_version,
+    publish_plan_version,
+    serialize_plan_version,
+)
+
+
+router = APIRouter(
+    prefix="/admin",
+    tags=["administration"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+
+
+def _request_context(request: Request) -> dict[str, str | None]:
+    return {
+        "request_id": request.headers.get("X-Request-ID"),
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+def _domain_error(
+    db: Session,
+    exc: Exception,
+    *,
+    actor_user_id: str | None = None,
+    request: Request | None = None,
+    entity_type: str = "unknown",
+    entity_id: str | None = None,
+) -> NoReturn:
+    db.rollback()
+    if isinstance(exc, OptimisticLockError):
+        if actor_user_id is not None:
+            context = _request_context(request) if request is not None else {}
+            add_audit_log(
+                db,
+                actor_user_id=actor_user_id,
+                action="admin.version_conflict",
+                entity_type=entity_type,
+                entity_id=entity_id,
+                after=exc.server_copy,
+                metadata={"reason": "optimistic_lock_failed"},
+                **context,
+            )
+            db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "version_conflict",
+                "message": str(exc),
+                "server_copy": exc.server_copy,
+            },
+        ) from exc
+    if isinstance(exc, PublishedPlanImmutableError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "published_plan_immutable", "message": str(exc)},
+        ) from exc
+    if isinstance(exc, PlanValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "plan_validation_failed",
+                "message": str(exc),
+                "issues": exc.issues,
+            },
+        ) from exc
+    if isinstance(exc, EntityNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "not_found", "message": str(exc)},
+        ) from exc
+    if isinstance(exc, IntegrityError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "integrity_conflict",
+                "message": "The request conflicts with an existing resource",
+            },
+        ) from exc
+    raise exc
+
+
+def _safe_commit(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        _domain_error(db, exc)
+
+
+def _slug(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "-", normalized.casefold()).strip("-")
+
+
+def _generated_code(db: Session, model: type[Any], name: str, requested: str | None, entity_id: str) -> str:
+    if requested:
+        return requested.strip().casefold()
+    base = _slug(name) or f"item-{entity_id[:8]}"
+    candidate = base[:64]
+    suffix = 1
+    while db.scalar(select(model.id).where(model.code == candidate)) is not None:
+        tail = f"-{suffix}"
+        candidate = f"{base[: 64 - len(tail)]}{tail}"
+        suffix += 1
+    return candidate
+
+
+def _lines(value: str | list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else value.splitlines()
+    return [item.strip() for item in values if item.strip()]
+
+
+def _serialize_exercise(exercise: Exercise) -> dict[str, Any]:
+    value = entity_dict(exercise)
+    cues = [cue for cue in exercise.cues if cue.deleted_at is None]
+    equipment_links = [link for link in exercise.equipment_links if link.deleted_at is None]
+    alternatives = [item for item in exercise.alternatives if item.deleted_at is None]
+    value.update(
+        {
+            "cues": "\n".join(cue.text for cue in cues),
+            "cue_items": [entity_dict(cue) for cue in cues],
+            "common_mistakes": "\n".join(exercise.common_mistakes_json),
+            "equipment_id": equipment_links[0].equipment_id if equipment_links else None,
+            "equipment_ids": [link.equipment_id for link in equipment_links],
+            "alternative_exercise_ids": [item.alternative_exercise_id for item in alternatives],
+            "alternatives": [entity_dict(item) for item in alternatives],
+            "definition_version": exercise.version,
+        }
+    )
+    return value
+
+
+def _equipment_ids(payload: ExerciseCreate | ExercisePatch) -> list[str] | None:
+    explicitly_set = "equipment_ids" in payload.model_fields_set or "equipment_id" in payload.model_fields_set
+    if isinstance(payload, ExerciseCreate):
+        explicitly_set = True
+    if not explicitly_set:
+        return None
+    values = [str(item) for item in (payload.equipment_ids or [])]
+    if payload.equipment_id:
+        values.insert(0, str(payload.equipment_id))
+    return list(dict.fromkeys(values))
+
+
+def _resolved_equipment_ids(
+    db: Session,
+    payload: ExerciseCreate | ExercisePatch,
+) -> list[str] | None:
+    values = _equipment_ids(payload)
+    if values is None:
+        return None
+    if not values and payload.equipment_name:
+        equipment = db.scalar(
+            select(Equipment).where(
+                func.lower(Equipment.name) == payload.equipment_name.strip().casefold(),
+                Equipment.is_active.is_(True),
+                Equipment.deleted_at.is_(None),
+            )
+        )
+        if equipment is not None:
+            values.append(equipment.id)
+    return values
+
+
+def _exercise_metadata(
+    payload: ExerciseCreate | ExercisePatch,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = dict(existing or {})
+    if "metadata_json" in payload.model_fields_set:
+        metadata = dict(payload.metadata_json or {})
+    compatibility = {
+        "equipment_name": payload.equipment_name,
+        "prescription": payload.prescription,
+        "alternative_names": payload.alternatives,
+    }
+    for key, value in compatibility.items():
+        if key in payload.model_fields_set and value is not None:
+            metadata[key] = value
+    return metadata
+
+
+def _replace_exercise_relations(
+    db: Session,
+    exercise: Exercise,
+    *,
+    cues: str | list[str] | None | object = ...,
+    equipment_ids: list[str] | None = None,
+    alternatives: list[str] | None = None,
+) -> None:
+    clear_cues = cues is not ...
+    clear_equipment = equipment_ids is not None
+    clear_alternatives = alternatives is not None
+    if clear_cues:
+        exercise.cues.clear()
+    if clear_equipment:
+        exercise.equipment_links.clear()
+    if clear_alternatives:
+        exercise.alternatives.clear()
+    if clear_cues or clear_equipment or clear_alternatives:
+        db.flush()
+
+    if clear_cues:
+        for sort_order, text in enumerate(_lines(cues if cues is not ... else None)):
+            exercise.cues.append(ExerciseCue(text=text, sort_order=sort_order))
+    if equipment_ids is not None:
+        for equipment_id in equipment_ids:
+            equipment = require_active(db, Equipment, equipment_id)
+            if not equipment.is_active:
+                raise PlanValidationError(
+                    [
+                        {
+                            "code": "equipment_inactive",
+                            "path": "equipment_ids",
+                            "message": f"Equipment '{equipment_id}' is inactive",
+                        }
+                    ]
+                )
+            exercise.equipment_links.append(
+                ExerciseEquipment(equipment_id=equipment_id, is_required=True, quantity=1)
+            )
+    if alternatives is not None:
+        for priority, alternative_id in enumerate(dict.fromkeys(alternatives)):
+            if alternative_id == exercise.id:
+                raise PlanValidationError(
+                    [
+                        {
+                            "code": "alternative_self_reference",
+                            "path": "alternative_exercise_ids",
+                            "message": "An exercise cannot be its own alternative",
+                        }
+                    ]
+                )
+            alternative = require_active(db, Exercise, alternative_id)
+            if not alternative.is_active:
+                raise PlanValidationError(
+                    [
+                        {
+                            "code": "alternative_inactive",
+                            "path": "alternative_exercise_ids",
+                            "message": f"Alternative exercise '{alternative_id}' is inactive",
+                        }
+                    ]
+                )
+            exercise.alternatives.append(
+                ExerciseAlternative(alternative_exercise_id=alternative_id, priority=priority)
+            )
+
+
+@router.post("/equipment", status_code=status.HTTP_201_CREATED)
+def create_equipment(
+    payload: EquipmentCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    entity_id = str(payload.id) if payload.id else uuid4_str()
+    equipment = Equipment(
+        id=entity_id,
+        code=_generated_code(db, Equipment, payload.name, payload.code, entity_id),
+        name=payload.name,
+        description=payload.description or None,
+        category=payload.category,
+        brand=payload.brand,
+        model=payload.model,
+        notes=payload.notes,
+        is_active=payload.is_active,
+        metadata_json=payload.metadata_json or {},
+    )
+    db.add(equipment)
+    try:
+        db.flush()
+        after = entity_dict(equipment)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.equipment.create",
+            entity_type="equipment",
+            entity_id=equipment.id,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="equipment",
+            entity_id=equipment.id,
+            entity_version=equipment.version,
+            operation="create",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (IntegrityError, EntityNotFoundError, PlanValidationError) as exc:
+        _domain_error(db, exc)
+
+
+@router.patch("/equipment/{equipment_id}")
+def patch_equipment(
+    equipment_id: str,
+    payload: EquipmentPatch,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    try:
+        current = require_active(db, Equipment, equipment_id)
+        before = entity_dict(current)
+        values = payload.model_dump(exclude_unset=True)
+        values.pop("expected_version", None)
+        if "metadata_json" in values and values["metadata_json"] is None:
+            values["metadata_json"] = {}
+        equipment = optimistic_patch(db, Equipment, equipment_id, payload.expected_version, values)
+        after = entity_dict(equipment)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.equipment.update",
+            entity_type="equipment",
+            entity_id=equipment.id,
+            before=before,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="equipment",
+            entity_id=equipment.id,
+            entity_version=equipment.version,
+            operation="update",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (EntityNotFoundError, OptimisticLockError, IntegrityError) as exc:
+        _domain_error(
+            db,
+            exc,
+            actor_user_id=current_user.id,
+            request=request,
+            entity_type="equipment",
+            entity_id=equipment_id,
+        )
+
+
+@router.post("/exercises", status_code=status.HTTP_201_CREATED)
+def create_exercise(
+    payload: ExerciseCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    entity_id = str(payload.id) if payload.id else uuid4_str()
+    exercise = Exercise(
+        id=entity_id,
+        code=_generated_code(db, Exercise, payload.name, payload.code, entity_id),
+        name=payload.name,
+        description=payload.description or None,
+        body_part=payload.body_part,
+        movement_pattern=payload.movement_pattern,
+        difficulty=payload.difficulty,
+        default_sets=payload.default_sets,
+        rep_min=payload.rep_min,
+        rep_max=payload.rep_max,
+        rep_unit=payload.rep_unit or "reps",
+        is_unilateral=payload.is_unilateral,
+        is_active=payload.is_active,
+        created_by_user_id=current_user.id,
+        common_mistakes_json=_lines(payload.common_mistakes),
+        metadata_json=_exercise_metadata(payload),
+    )
+    db.add(exercise)
+    try:
+        _replace_exercise_relations(
+            db,
+            exercise,
+            cues=payload.cues,
+            equipment_ids=_resolved_equipment_ids(db, payload),
+            alternatives=[str(item) for item in payload.alternative_exercise_ids],
+        )
+        db.flush()
+        after = _serialize_exercise(exercise)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.exercise.create",
+            entity_type="exercise",
+            entity_id=exercise.id,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="exercise",
+            entity_id=exercise.id,
+            entity_version=exercise.version,
+            operation="create",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (EntityNotFoundError, PlanValidationError, IntegrityError) as exc:
+        _domain_error(db, exc)
+
+
+@router.patch("/exercises/{exercise_id}")
+def patch_exercise(
+    exercise_id: str,
+    payload: ExercisePatch,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    try:
+        exercise = require_active(db, Exercise, exercise_id, for_update=True)
+        if exercise.version != payload.expected_version:
+            raise OptimisticLockError(_serialize_exercise(exercise))
+        before = _serialize_exercise(exercise)
+        values = payload.model_dump(exclude_unset=True)
+        values.pop("expected_version", None)
+        relation_fields = {
+            "id",
+            "cues",
+            "equipment_id",
+            "equipment_ids",
+            "alternative_exercise_ids",
+            "common_mistakes",
+            "equipment_name",
+            "prescription",
+            "alternatives",
+        }
+        for key, value in values.items():
+            if key in relation_fields:
+                continue
+            if key == "metadata_json" and value is None:
+                value = {}
+            if hasattr(exercise, key):
+                setattr(exercise, key, value)
+        if "common_mistakes" in values:
+            exercise.common_mistakes_json = _lines(payload.common_mistakes)
+        if {
+            "metadata_json",
+            "equipment_name",
+            "prescription",
+            "alternatives",
+        }.intersection(payload.model_fields_set):
+            exercise.metadata_json = _exercise_metadata(payload, exercise.metadata_json)
+        equipment_ids = _resolved_equipment_ids(db, payload)
+        alternatives = (
+            [str(item) for item in payload.alternative_exercise_ids or []]
+            if "alternative_exercise_ids" in payload.model_fields_set
+            else None
+        )
+        cues: str | list[str] | None | object = (
+            payload.cues if "cues" in payload.model_fields_set else ...
+        )
+        _replace_exercise_relations(
+            db,
+            exercise,
+            cues=cues,
+            equipment_ids=equipment_ids,
+            alternatives=alternatives,
+        )
+        exercise.version += 1
+        db.flush()
+        after = _serialize_exercise(exercise)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.exercise.update",
+            entity_type="exercise",
+            entity_id=exercise.id,
+            before=before,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="exercise",
+            entity_id=exercise.id,
+            entity_version=exercise.version,
+            operation="update",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (EntityNotFoundError, OptimisticLockError, PlanValidationError, IntegrityError) as exc:
+        _domain_error(
+            db,
+            exc,
+            actor_user_id=current_user.id,
+            request=request,
+            entity_type="exercise",
+            entity_id=exercise_id,
+        )
+
+
+@router.post("/plans", status_code=status.HTTP_201_CREATED)
+def create_plan(
+    payload: PlanCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    plan = TrainingPlan(
+        id=str(payload.id) if payload.id else uuid4_str(),
+        owner_user_id=None if payload.is_system else current_user.id,
+        name=payload.name,
+        description=payload.description or None,
+        goal=payload.goal,
+        is_system=payload.is_system,
+        is_active=payload.is_active,
+    )
+    db.add(plan)
+    try:
+        db.flush()
+        after = entity_dict(plan)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.plan.create",
+            entity_type="training_plan",
+            entity_id=plan.id,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="training_plan",
+            entity_id=plan.id,
+            entity_version=plan.version,
+            operation="create",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except IntegrityError as exc:
+        _domain_error(db, exc)
+
+
+@router.post("/plans/{plan_id}/versions", status_code=status.HTTP_201_CREATED)
+def create_version(
+    plan_id: str,
+    payload: PlanVersionCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    try:
+        version = create_plan_version(db, plan_id, payload)
+        after = serialize_plan_version(version)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.plan_version.create",
+            entity_type="plan_version",
+            entity_id=version.id,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="plan_version",
+            entity_id=version.id,
+            entity_version=version.version,
+            operation="create",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (EntityNotFoundError, PlanValidationError, IntegrityError) as exc:
+        _domain_error(db, exc)
+
+
+@router.patch("/plan-versions/{version_id}")
+def patch_version(
+    version_id: str,
+    payload: PlanVersionPatch,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    try:
+        version, before = patch_plan_version(db, version_id, payload)
+        after = serialize_plan_version(version)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.plan_version.update",
+            entity_type="plan_version",
+            entity_id=version.id,
+            before=before,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="plan_version",
+            entity_id=version.id,
+            entity_version=version.version,
+            operation="update",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (
+        EntityNotFoundError,
+        OptimisticLockError,
+        PublishedPlanImmutableError,
+        IntegrityError,
+    ) as exc:
+        _domain_error(
+            db,
+            exc,
+            actor_user_id=current_user.id,
+            request=request,
+            entity_type="plan_version",
+            entity_id=version_id,
+        )
+
+
+@router.post("/plan-versions/{version_id}/publish")
+def publish_version(
+    version_id: str,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    payload: PlanVersionPublish | None = None,
+) -> dict[str, Any]:
+    try:
+        version, before = publish_plan_version(
+            db,
+            version_id,
+            actor_user_id=current_user.id,
+            expected_version=payload.expected_version if payload else None,
+        )
+        after = serialize_plan_version(version)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.plan_version.publish",
+            entity_type="plan_version",
+            entity_id=version.id,
+            before=before,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="plan_version",
+            entity_id=version.id,
+            entity_version=version.version,
+            operation="update",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (
+        EntityNotFoundError,
+        OptimisticLockError,
+        PublishedPlanImmutableError,
+        PlanValidationError,
+        IntegrityError,
+    ) as exc:
+        _domain_error(
+            db,
+            exc,
+            actor_user_id=current_user.id,
+            request=request,
+            entity_type="plan_version",
+            entity_id=version_id,
+        )
+
+
+@router.post("/assignments", status_code=status.HTTP_201_CREATED)
+def assign_plan(
+    payload: AssignmentCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    try:
+        assignment = create_assignment(db, payload, actor_user_id=current_user.id)
+        after = entity_dict(assignment)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.assignment.create",
+            entity_type="plan_assignment",
+            entity_id=assignment.id,
+            after=after,
+            **_request_context(request),
+        )
+        add_sync_change(
+            db,
+            entity_type="plan_assignment",
+            entity_id=assignment.id,
+            entity_version=assignment.version,
+            operation="create",
+            payload=after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        _safe_commit(db)
+        return after
+    except (EntityNotFoundError, PlanValidationError, IntegrityError) as exc:
+        _domain_error(db, exc)
+
+
+@router.get("/audit-logs", response_model=AuditLogPage)
+def audit_logs(
+    db: Annotated[Session, Depends(get_db)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    action: str | None = Query(default=None, max_length=64),
+    entity_type: str | None = Query(default=None, max_length=64),
+) -> AuditLogPage:
+    try:
+        offset = max(0, int(cursor or "0"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "cursor_invalid", "message": "Audit cursor must be numeric"},
+        ) from exc
+    conditions = [AuditLog.deleted_at.is_(None)]
+    if action:
+        conditions.append(AuditLog.action == action)
+    if entity_type:
+        conditions.append(AuditLog.entity_type == entity_type)
+    rows = list(
+        db.scalars(
+            select(AuditLog)
+            .where(*conditions)
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
+        ).all()
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = str(offset + len(rows)) if has_more else None
+    return AuditLogPage(
+        items=[AuditLogResponse.model_validate(entity_dict(row)) for row in rows],
+        cursor=cursor,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.get("/sync-status", response_model=SyncStatusResponse)
+def sync_status(db: Annotated[Session, Depends(get_db)]) -> SyncStatusResponse:
+    now = datetime.now(UTC)
+    latest_sequence = db.scalar(select(func.max(SyncChange.sequence)))
+    recent_count = db.scalar(
+        select(func.count()).select_from(SyncChange).where(
+            SyncChange.changed_at >= now - timedelta(hours=24)
+        )
+    )
+    return SyncStatusResponse(
+        server_time=now,
+        latest_sequence=latest_sequence,
+        changes_last_24_hours=int(recent_count or 0),
+        # Sync ingestion is synchronous, so there is no hidden pending queue.
+        pending_operations=0,
+        failed_operations=0,
+        status="healthy",
+    )
