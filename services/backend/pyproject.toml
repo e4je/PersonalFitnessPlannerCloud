@@ -26,9 +26,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "mypy==2.3.0",
   "pip-tools>=7.5,<8",
   "pytest>=8.4,<9",
   "pytest-cov>=6.2,<7",
+  "ruff==0.16.2",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -48,3 +50,12 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Start with correctness checks that catch syntax errors and invalid/unused
+# names. Broader style families (I, UP, B, DTZ, and others) will be enabled
+# incrementally as the integrated backend's historical lint debt is cleared.
+select = ["E9", "F"]

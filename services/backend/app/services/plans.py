@@ -22,7 +22,6 @@ from app.models import (
     User,
 )
 from app.repositories.common import (
-    EntityNotFoundError,
     OptimisticLockError,
     entity_dict,
     get_active,

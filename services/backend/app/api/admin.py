@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db, require_roles
-from app.db.base import utcnow, uuid4_str
+from app.db.base import uuid4_str
 from app.models import (
     AuditLog,
     Equipment,
@@ -19,8 +19,6 @@ from app.models import (
     ExerciseAlternative,
     ExerciseCue,
     ExerciseEquipment,
-    PlanAssignment,
-    PlanVersion,
     SyncChange,
     TrainingPlan,
     User,

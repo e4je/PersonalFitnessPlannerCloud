@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
-
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
