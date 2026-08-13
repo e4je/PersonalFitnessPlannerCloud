@@ -43,7 +43,7 @@
 - 无 assignment 的首次用户使用稳定本地 fallback assignment，不向服务端伪造 assignment。
 - JWT subject 与本地 `account_subject` 绑定；A→B 若有 pending Outbox/本地草稿会 fail-closed，无 pending 时事务清旧健康缓存和全部 cursor。未登录或认证变化会同步清空/重载五个业务 ViewModel，避免内存 UI 泄露。
 
-验证：最终统一源码通过 xUnit 74/74 和 WPF build 0 warning/0 error；输出仅位于随后清理的 TEMP 副本，未在统一树生成 EXE/bin/obj。
+验证：当前统一源码通过 xUnit 89/89 和 WPF build 0 warning/0 error；Release publish/EXE smoke 仍留待统一构建。
 
 ## Backend 当前统一状态
 
@@ -55,7 +55,7 @@
 - 默认/占位生产密钥已移除并 fail-closed；根 `.env` 使用与当前工作目录无关的安全探测，浅层 `/app` 容器路径不会越界。
 - recommendation/progression 纯规则服务和共享向量测试已接入；无 assignment fallback 的 adaptation week 从首次持久训练推导。
 
-统一副本 pytest：55 passed / 1 real-MySQL skipped。真实 MySQL、Docker 与完整 E2E 留待统一构建。
+统一副本快速 pytest：72 passed / 1 real-MySQL test deselected。真实 MySQL、Docker 与完整 E2E 留待统一构建。
 
 ## 已知但不阻断源码整合的限制
 

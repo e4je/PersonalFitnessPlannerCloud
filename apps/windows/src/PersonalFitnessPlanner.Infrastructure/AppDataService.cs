@@ -69,7 +69,7 @@ public sealed class AppDataService : IDisposable
             if (_initialized) return;
             await Repository.InitializeAsync(cancellationToken).ConfigureAwait(false);
             var settings = await Settings.GetAsync(cancellationToken).ConfigureAwait(false);
-            ApiClient.ConfigureBaseAddress(settings.ApiBaseUrl);
+            await ApiClient.ConfigureBaseAddressAsync(settings.ApiBaseUrl, cancellationToken).ConfigureAwait(false);
             await ReconcileStoredAccountAsync(cancellationToken).ConfigureAwait(false);
             _initialized = true;
             _logger.LogInformation("Infrastructure initialized at {DataDirectory}; schema v{SchemaVersion}.",
@@ -296,8 +296,11 @@ public sealed class AppDataService : IDisposable
     public async Task SaveSettingsAsync(AppSettingsData settings, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        SettingsStore.Validate(settings);
+        // Rebind (and, when the origin changes, delete credentials) before the
+        // new address can be persisted and observed after a restart.
+        await ApiClient.ConfigureBaseAddressAsync(settings.ApiBaseUrl, cancellationToken).ConfigureAwait(false);
         await Settings.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
-        ApiClient.ConfigureBaseAddress(settings.ApiBaseUrl);
     }
 
     public async Task<AuthenticationState> LoginAsync(
@@ -480,7 +483,7 @@ public sealed class AppDataService : IDisposable
 
     private async Task ReconcileStoredAccountAsync(CancellationToken cancellationToken)
     {
-        var stored = await Tokens.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var stored = await ApiClient.LoadCurrentTokensAsync(cancellationToken).ConfigureAwait(false);
         if (stored is null) return;
         var claims = JwtRoleParser.Parse(stored.AccessToken);
         if (!claims.IsValid || string.IsNullOrWhiteSpace(claims.Subject))
@@ -503,7 +506,7 @@ public sealed class AppDataService : IDisposable
     private async Task<AccountScopePreparation> PrepareCurrentAccountScopeAsync(
         CancellationToken cancellationToken)
     {
-        var stored = await Tokens.LoadAsync(cancellationToken).ConfigureAwait(false)
+        var stored = await ApiClient.LoadCurrentTokensAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new UnauthorizedAccessException("请先登录后再同步。");
         var claims = JwtRoleParser.Parse(stored.AccessToken);
         if (!claims.IsValid || string.IsNullOrWhiteSpace(claims.Subject))

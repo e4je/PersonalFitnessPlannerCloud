@@ -132,22 +132,31 @@ class WorkoutExportManager(private val context: Context) {
                         set.pain.toString(),
                         set.completed.toString(),
                         set.notes.orEmpty(),
-                    ).joinToString(",", transform = ::escapeCsv),
+                    ).joinToString(",", transform = ::escapeCsvCell),
                 )
             }
         }
     }
 
-    private fun escapeCsv(value: String): String = if (
-        value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
-    ) {
-        "\"${value.replace("\"", "\"\"")}\""
-    } else {
-        value
-    }
-
     private companion object {
         const val EXPORT_DIRECTORY = "exports"
         const val BACKUP_DIRECTORY = "backups"
+    }
+}
+
+/**
+ * Escapes a CSV cell and neutralizes spreadsheet formulas in user-controlled text.
+ * The apostrophe is deliberately added before any leading whitespace so spreadsheet
+ * applications cannot trim the value back into an executable formula.
+ */
+internal fun escapeCsvCell(value: String): String {
+    val safeValue = when (value.firstOrNull { !it.isWhitespace() }) {
+        '=', '+', '-', '@' -> "'$value"
+        else -> value
+    }
+    return if (safeValue.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
+        "\"${safeValue.replace("\"", "\"\"")}\""
+    } else {
+        safeValue
     }
 }

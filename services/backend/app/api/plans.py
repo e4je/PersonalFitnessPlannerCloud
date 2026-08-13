@@ -7,10 +7,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentUser, role_names
 from app.db.session import get_db
 from app.schemas.plans import PlanVersionOut
-from app.services.plan_queries import get_current_plan, get_plan_version
+from app.services.plan_queries import can_access_plan_version, get_current_plan, get_plan_version
 from app.services.serialization import plan_version_to_dict
 
 
@@ -45,11 +45,15 @@ def plan_detail(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, object]:
     plan_version = get_plan_version(db, plan_version_id)
-    role_names = {role.name for role in current_user.roles}
-    if plan_version is None or (
-        plan_version.status != "published"
-        and not current_user.is_superuser
-        and "admin" not in role_names
+    is_admin = current_user.is_superuser or "admin" in {
+        name.casefold() for name in role_names(db, current_user)
+    }
+    if plan_version is None or not can_access_plan_version(
+        db,
+        plan_version,
+        user_id=current_user.id,
+        is_admin=is_admin,
+        local_date=_today(current_user.timezone),
     ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

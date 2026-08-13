@@ -62,10 +62,74 @@ public sealed class AuthenticationAndApiTests
         var client = new FitnessApiClient(http, new DpapiTokenStore(new AppPaths(temporary.Path)));
 
         Assert.Throws<ArgumentException>(() => client.ConfigureBaseAddress("http://fitness.example.com"));
+        Assert.Throws<ArgumentException>(() => client.ConfigureBaseAddress("https://user:pass@fitness.example.com"));
+        Assert.Throws<ArgumentException>(() => client.ConfigureBaseAddress("https://fitness.example.com?next=https://attacker.invalid"));
+        Assert.Throws<ArgumentException>(() => client.ConfigureBaseAddress("https://fitness.example.com/#fragment"));
         client.ConfigureBaseAddress("http://localhost:8000/base/");
-        Assert.Equal(new Uri("http://localhost:8000/base/"), http.BaseAddress);
+        Assert.Equal(new Uri("http://localhost:8000/base/"), client.BaseAddress);
         client.ConfigureBaseAddress("https://fitness.example.com/api-root");
-        Assert.Equal(new Uri("https://fitness.example.com/api-root/"), http.BaseAddress);
+        Assert.Equal(new Uri("https://fitness.example.com/api-root/"), client.BaseAddress);
+    }
+
+    [Fact]
+    public async Task ConfigureBaseAddress_DeletesLegacyAndCrossOriginCredentialsBeforeAnyRequest()
+    {
+        using var temporary = new TemporaryDirectory("API 源站令牌绑定");
+        var tokenStore = new DpapiTokenStore(new AppPaths(temporary.Path));
+        var handler = new RecordingHandler(_ => JsonResponse(HttpStatusCode.OK, "{\"changes\":[],\"next_cursor\":\"\"}"));
+        using var http = new HttpClient(handler);
+        var client = new FitnessApiClient(http, tokenStore);
+
+        await tokenStore.SaveAsync(TokenForRole("user") with { ApiOrigin = "" });
+        await client.ConfigureBaseAddressAsync("https://fitness.example.com/api/");
+        Assert.Null(await tokenStore.LoadAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => client.GetChangesAsync(string.Empty));
+        Assert.Empty(handler.Requests);
+
+        await tokenStore.SaveAsync(TokenForRole("user"));
+        await client.ConfigureBaseAddressAsync("https://attacker.example.net/");
+        Assert.Null(await tokenStore.LoadAsync());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => client.GetChangesAsync(string.Empty));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ConfigureBaseAddress_PreservesCredentialAcrossPathsOnSameNormalizedOrigin()
+    {
+        using var temporary = new TemporaryDirectory("API 同源路径切换");
+        var tokenStore = new DpapiTokenStore(new AppPaths(temporary.Path));
+        using var http = new HttpClient(new RecordingHandler(_ => JsonResponse(HttpStatusCode.OK, "{}")));
+        var client = new FitnessApiClient(http, tokenStore);
+        await client.ConfigureBaseAddressAsync("https://FITNESS.example.com:443/api-one/");
+        await tokenStore.SaveAsync(TokenForRole("user"));
+
+        await client.ConfigureBaseAddressAsync("https://fitness.example.com/api-two/");
+
+        Assert.NotNull(await tokenStore.LoadAsync());
+        Assert.Equal(new Uri("https://fitness.example.com/api-two/"), client.BaseAddress);
+    }
+
+    [Fact]
+    public async Task AuthorizedRequest_CannotDeadlockWhenConfigurationChangeWaitsForIt()
+    {
+        using var temporary = new TemporaryDirectory("API 配置并发切换");
+        var tokenStore = new DpapiTokenStore(new AppPaths(temporary.Path));
+        await tokenStore.SaveAsync(TokenForRole("user"));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new HttpClient(new BlockingHandler(entered, release));
+        var client = new FitnessApiClient(http, tokenStore);
+        await client.ConfigureBaseAddressAsync("https://fitness.example.com/");
+
+        var requestTask = client.GetChangesAsync(string.Empty);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var configureTask = client.ConfigureBaseAddressAsync("https://attacker.example.net/");
+        Assert.False(configureTask.IsCompleted);
+        release.SetResult();
+
+        await requestTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await configureTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Null(await tokenStore.LoadAsync());
     }
 
     [Fact]
@@ -94,6 +158,109 @@ public sealed class AuthenticationAndApiTests
     }
 
     [Fact]
+    public async Task ApiError_ReportsOnlyBoundedWhitelistedStringsAndNeverEchoesSensitiveBodyData()
+    {
+        using var temporary = new TemporaryDirectory("API 错误脱敏");
+        var sensitiveBody = JsonSerializer.Serialize(new
+        {
+            code = "invalid_request",
+            message = "Request could not be processed",
+            detail = "Validation failed",
+            password = "password-value-should-never-appear",
+            access_token = "access-value-should-never-appear",
+            validation = new[] { new { input = "private-input-should-never-appear" } },
+            unexpected = "whole-body-marker-should-never-appear"
+        });
+        using var http = new HttpClient(new RecordingHandler(_ =>
+            JsonResponse(HttpStatusCode.UnprocessableEntity, sensitiveBody)));
+        var client = new FitnessApiClient(http, new DpapiTokenStore(new AppPaths(temporary.Path)));
+        client.ConfigureBaseAddress("https://fitness.example.com/");
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(
+            () => client.LoginAsync("private-login@example.com", "private-login-password"));
+
+        Assert.Contains("422", exception.Message);
+        Assert.Contains("code=invalid_request", exception.Message);
+        Assert.Contains("message=Request could not be processed", exception.Message);
+        Assert.Contains("detail=Validation failed", exception.Message);
+        Assert.DoesNotContain("password-value", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("access-value", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-input", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("whole-body-marker", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-login", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApiError_RedactsSensitiveWhitelistedTextAndIgnoresStructuredValidationDetail()
+    {
+        using var temporary = new TemporaryDirectory("API 错误敏感白名单字段");
+        var call = 0;
+        using var http = new HttpClient(new RecordingHandler(_ =>
+        {
+            call++;
+            return call == 1
+                ? JsonResponse(HttpStatusCode.BadRequest, JsonSerializer.Serialize(new
+                {
+                    code = "bad_credentials",
+                    message = "password=hunter2",
+                    detail = "access_token=eyJ-secret-token"
+                }))
+                : JsonResponse(HttpStatusCode.UnprocessableEntity, JsonSerializer.Serialize(new
+                {
+                    code = 422,
+                    message = new { text = "not-a-string-marker" },
+                    detail = new[] { new { input = "validation-input-marker" } }
+                }));
+        }));
+        var client = new FitnessApiClient(http, new DpapiTokenStore(new AppPaths(temporary.Path)));
+        client.ConfigureBaseAddress("https://fitness.example.com/");
+
+        var sensitive = await Assert.ThrowsAsync<HttpRequestException>(
+            () => client.LoginAsync("user@example.com", "password"));
+        var structured = await Assert.ThrowsAsync<HttpRequestException>(
+            () => client.LoginAsync("user@example.com", "password"));
+
+        Assert.Contains("message=[REDACTED]", sensitive.Message);
+        Assert.Contains("detail=[REDACTED]", sensitive.Message);
+        Assert.DoesNotContain("hunter2", sensitive.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("eyJ-secret-token", sensitive.Message, StringComparison.Ordinal);
+        Assert.Equal("API 请求失败 (422)。", structured.Message);
+        Assert.DoesNotContain("validation-input-marker", structured.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("not-a-string-marker", structured.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApiError_DoesNotEchoPlainTextOrOversizedBodyOrReasonPhrase()
+    {
+        using var temporary = new TemporaryDirectory("API 非 JSON 错误不回显");
+        var call = 0;
+        using var http = new HttpClient(new RecordingHandler(_ =>
+        {
+            call++;
+            var response = call == 1
+                ? new HttpResponseMessage(HttpStatusCode.BadGateway)
+                {
+                    Content = new StringContent("plain-body-secret-marker", Encoding.UTF8, "text/plain")
+                }
+                : JsonResponse(HttpStatusCode.BadGateway, "{\"message\":\"" + new string('x', 33 * 1024) + "\"}");
+            response.ReasonPhrase = "reason-phrase-secret-marker";
+            return response;
+        }));
+        var client = new FitnessApiClient(http, new DpapiTokenStore(new AppPaths(temporary.Path)));
+        client.ConfigureBaseAddress("https://fitness.example.com/");
+
+        var plain = await Assert.ThrowsAsync<HttpRequestException>(
+            () => client.LoginAsync("user@example.com", "password"));
+        var oversized = await Assert.ThrowsAsync<HttpRequestException>(
+            () => client.LoginAsync("user@example.com", "password"));
+
+        Assert.Equal("API 请求失败 (502)。", plain.Message);
+        Assert.Equal("API 请求失败 (502)。", oversized.Message);
+        Assert.DoesNotContain("plain-body-secret-marker", plain.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("reason-phrase-secret-marker", plain.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UnauthorizedRequest_RefreshesTokenOnce_AndRetriesWithNewBearerToken()
     {
         using var temporary = new TemporaryDirectory("令牌 刷新");
@@ -101,7 +268,11 @@ public sealed class AuthenticationAndApiTests
         var tokenStore = new DpapiTokenStore(paths);
         var oldToken = CreateJwt(new { sub = "u", roles = new[] { "user" }, exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() });
         var newToken = CreateJwt(new { sub = "u", roles = new[] { "user" }, exp = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds() });
-        await tokenStore.SaveAsync(new StoredTokens(oldToken, "refresh-old", DateTimeOffset.UtcNow.AddHours(1)));
+        await tokenStore.SaveAsync(new StoredTokens(
+            oldToken,
+            "refresh-old",
+            DateTimeOffset.UtcNow.AddHours(1),
+            ApiOrigin: "https://fitness.example.com:443"));
 
         var changesAttempts = 0;
         var handler = new RecordingHandler(request =>
@@ -168,6 +339,7 @@ public sealed class AuthenticationAndApiTests
         await client.LoginAsync("epoch@example.com", "password");
 
         Assert.Equal(expectedExpiration, (await tokenStore.LoadAsync())!.ExpiresAt);
+        Assert.Equal("https://fitness.example.com:443", (await tokenStore.LoadAsync())!.ApiOrigin);
     }
 
     [Fact]
@@ -693,7 +865,8 @@ public sealed class AuthenticationAndApiTests
             CreateJwt(new { sub = "test-user", role, exp = expiry.ToUnixTimeSeconds() }),
             "refresh-token",
             expiry,
-            "测试用户");
+            "测试用户",
+            "https://fitness.example.com:443");
     }
 
     private static OutboxItem CreateOutbox(string key) => new(
@@ -745,6 +918,27 @@ public sealed class AuthenticationAndApiTests
                 request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken));
             Requests.Add(capture);
             return _response(capture);
+        }
+    }
+
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _entered;
+        private readonly TaskCompletionSource _release;
+
+        public BlockingHandler(TaskCompletionSource entered, TaskCompletionSource release)
+        {
+            _entered = entered;
+            _release = release;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _entered.SetResult();
+            await _release.Task.WaitAsync(cancellationToken);
+            return JsonResponse(HttpStatusCode.OK, "{\"changes\":[],\"next_cursor\":\"\"}");
         }
     }
 }

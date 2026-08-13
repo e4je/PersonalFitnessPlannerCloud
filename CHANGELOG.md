@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased - Security hardening
+
+- Bound Windows DPAPI credentials to the normalized API origin and made legacy/cross-origin tokens fail closed; portable JSON imports can no longer replace API or local storage paths.
+- Upgraded the Windows native SQLite bundle beyond the SQLite 3.50.2 security baseline and added transitive NuGet audit enforcement.
+- Restricted private published-plan reads to system plans, owners, valid assignees, and current database administrators; new assignments re-emit the full plan tree before their reference.
+- Enforced the backend request limit on actual streamed ASGI bytes and serialized version-checked workout/readiness/cardio mutations with database row locks.
+- Kept `expected_version` optional for legacy-client compatibility while documenting that only supplied versions receive stale-copy rejection; real MySQL concurrency verification remains pending.
+- Neutralized spreadsheet formulas in Android and Windows CSV exports, bounded Windows JSON imports, redacted Windows API error bodies, and added 14-day log retention.
+- Switched the default backend image to one Gunicorn worker for consistent process-local login limiting, and added Dependabot plus Python/NuGet dependency gates.
+
 ## 1.0.0 - 2026-08-09
 
 - 将 Android、Windows 和 FastAPI/MySQL 三套独立源码整合进统一仓库，同时保留各模块独立构建入口。

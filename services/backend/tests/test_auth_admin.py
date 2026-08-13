@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -9,8 +10,19 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_refresh_token
-from app.models import AuditLog, Equipment, Exercise, RefreshToken, User
+from app.core.security import create_access_token, hash_refresh_token
+from app.db.base import utcnow
+from app.models import (
+    AuditLog,
+    Equipment,
+    Exercise,
+    PlanAssignment,
+    RefreshToken,
+    Role,
+    TrainingPlan,
+    User,
+    UserRole,
+)
 from app.schemas.admin import PlanVersionCreate, PlanVersionPatch
 
 
@@ -94,6 +106,11 @@ def _publish(
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def _authorization_headers(user: User) -> dict[str, str]:
+    token, _expires_at = create_access_token(user.id)
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_plan_fatigue_threshold_matches_ten_point_readiness_scale() -> None:
@@ -376,6 +393,162 @@ def test_new_version_copies_published_tree_and_can_be_assigned(
     assert assignment["user_id"] == normal_user.id
     assert assignment["plan_version_id"] == published_v2["id"]
     assert assignment["status"] == "active"
+    assert assignment["start_local_date"] == date.today().isoformat()
+    assert assignment["end_local_date"] is None
+    assert assignment["is_active"] is True
+    assert "starts_on" not in assignment
+    assert "ends_on" not in assignment
+
+
+def test_plan_detail_allows_system_owner_and_assignee_but_hides_private_plan(
+    client: TestClient,
+    db_session: Session,
+    user_headers: dict[str, str],
+    admin_headers: dict[str, str],
+    user_factory: Callable[..., User],
+    catalog_items: tuple[Exercise, Equipment],
+) -> None:
+    exercise, _equipment = catalog_items
+
+    system_plan_response = client.post(
+        "/api/v1/admin/plans",
+        headers=admin_headers,
+        json={"name": "Readable system plan", "goal": "general", "is_system": True},
+    )
+    assert system_plan_response.status_code == 201, system_plan_response.text
+    system_draft_response = client.post(
+        f"/api/v1/admin/plans/{system_plan_response.json()['id']}/versions",
+        headers=admin_headers,
+        json=_valid_plan_version_payload(exercise),
+    )
+    assert system_draft_response.status_code == 201, system_draft_response.text
+    system_version = _publish(client, admin_headers, system_draft_response.json())
+
+    private_plan, private_draft = _create_plan_with_draft(client, admin_headers, exercise)
+    private_version = _publish(client, admin_headers, private_draft)
+    owner = user_factory()
+    assignee = user_factory()
+    unrelated = user_factory()
+    stored_plan = db_session.get(TrainingPlan, private_plan["id"])
+    assert stored_plan is not None
+    stored_plan.owner_user_id = owner.id
+    db_session.add(
+        PlanAssignment(
+            user_id=assignee.id,
+            plan_version_id=private_version["id"],
+            status="scheduled",
+            starts_on=date.today(),
+            settings_json={},
+        )
+    )
+    db_session.commit()
+
+    system_detail = client.get(
+        f"/api/v1/plans/{system_version['id']}", headers=user_headers
+    )
+    owner_detail = client.get(
+        f"/api/v1/plans/{private_version['id']}", headers=_authorization_headers(owner)
+    )
+    assignee_detail = client.get(
+        f"/api/v1/plans/{private_version['id']}", headers=_authorization_headers(assignee)
+    )
+    hidden_detail = client.get(
+        f"/api/v1/plans/{private_version['id']}", headers=_authorization_headers(unrelated)
+    )
+
+    assert system_detail.status_code == 200, system_detail.text
+    assert owner_detail.status_code == 200, owner_detail.text
+    assert assignee_detail.status_code == 200, assignee_detail.text
+    assert hidden_detail.status_code == 404
+    assert hidden_detail.json()["detail"]["code"] == "plan_not_found"
+
+
+def test_soft_deleted_admin_role_cannot_read_draft_plan(
+    client: TestClient,
+    db_session: Session,
+    admin_user: User,
+    admin_headers: dict[str, str],
+    catalog_items: tuple[Exercise, Equipment],
+) -> None:
+    exercise, _equipment = catalog_items
+    _plan, draft = _create_plan_with_draft(client, admin_headers, exercise)
+    authorized = client.get(f"/api/v1/plans/{draft['id']}", headers=admin_headers)
+    assert authorized.status_code == 200, authorized.text
+    admin_role = db_session.scalar(select(Role).where(Role.name == "admin"))
+    assert admin_role is not None
+    link = db_session.scalar(
+        select(UserRole).where(
+            UserRole.user_id == admin_user.id,
+            UserRole.role_id == admin_role.id,
+        )
+    )
+    assert link is not None
+    link.deleted_at = utcnow()
+    db_session.commit()
+
+    response = client.get(f"/api/v1/plans/{draft['id']}", headers=admin_headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "plan_not_found"
+
+
+def test_superuser_without_admin_role_can_read_draft_plan(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    user_factory: Callable[..., User],
+    catalog_items: tuple[Exercise, Equipment],
+) -> None:
+    exercise, _equipment = catalog_items
+    _plan, draft = _create_plan_with_draft(client, admin_headers, exercise)
+    superuser = user_factory(role_name="user", is_superuser=True)
+
+    response = client.get(
+        f"/api/v1/plans/{draft['id']}", headers=_authorization_headers(superuser)
+    )
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    ("assignment_status", "starts_on", "ends_on"),
+    [
+        ("completed", date.today() - date.resolution, date.today()),
+        ("cancelled", date.today(), None),
+        ("active", date.today() - date.resolution * 2, date.today() - date.resolution),
+    ],
+)
+def test_plan_detail_rejects_inactive_or_expired_assignment(
+    client: TestClient,
+    db_session: Session,
+    admin_headers: dict[str, str],
+    user_factory: Callable[..., User],
+    catalog_items: tuple[Exercise, Equipment],
+    assignment_status: str,
+    starts_on: date,
+    ends_on: date | None,
+) -> None:
+    exercise, _equipment = catalog_items
+    _plan, draft = _create_plan_with_draft(client, admin_headers, exercise)
+    published = _publish(client, admin_headers, draft)
+    assignee = user_factory()
+    db_session.add(
+        PlanAssignment(
+            user_id=assignee.id,
+            plan_version_id=published["id"],
+            status=assignment_status,
+            starts_on=starts_on,
+            ends_on=ends_on,
+            settings_json={},
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        f"/api/v1/plans/{published['id']}", headers=_authorization_headers(assignee)
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "plan_not_found"
 
 
 def test_stale_admin_patch_returns_409_and_writes_conflict_audit(

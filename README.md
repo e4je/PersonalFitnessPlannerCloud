@@ -1,27 +1,152 @@
 # Personal Fitness Planner Cloud
 
-这是 Android、Windows 和 FastAPI/MySQL 三端统一维护仓库。三套原始交付源码已完整迁入可独立构建的模块；APK、EXE、`build/bin/obj`、Gradle/NuGet/Python 缓存和本机配置没有混入统一源码树。
+一个供个人使用的跨平台健身记录与训练计划项目，包含 Android 客户端、Windows 桌面端和可选的云同步服务。
+
+不连接服务器时，Android 和 Windows 客户端都可以独立记录训练；部署后端后，两端可以同步计划、训练记录、每日状态和有氧记录。项目内置一套适合新手的 A/B 全身训练计划，并根据训练历史、恢复情况和计划进度给出当天建议。
+
+> 本项目以个人使用和自行托管为目标，不提供公开在线服务，也没有应用商店发布计划。
+
+## 主要功能
+
+- 内置新手增肌减脂 A/B 全身计划，每个训练日包含 8 个训练位置和可替换动作。
+- 根据最近训练、休息天数、每周训练次数和疲劳程度推荐 A、B、恢复或有氧。
+- 记录动作、重量、次数、组数、RIR、疼痛、动作质量和训练备注。
+- 根据历史完成情况给出下次重量建议。
+- 保存训练历史、每日恢复状态和有氧记录，并支持数据导出。
+- Android 使用 Room 离线存储，Windows 使用 SQLite 离线存储。
+- 连接云端后采用增量同步和本地待传队列，断网时仍可正常记录。
+- 支持计划版本和训练快照，计划更新后不会改变过去的训练记录。
+- 登录令牌在 Android Keystore 或 Windows DPAPI 中加密保存。
+
+## 项目组成
 
 ```text
 PersonalFitnessPlannerCloud/
-├─ apps/android/              Kotlin + Compose + Room
-├─ apps/windows/              .NET 8 + WPF + SQLite
-├─ services/backend/          FastAPI + SQLAlchemy + Alembic + MySQL 8
-├─ contracts/                 OpenAPI、默认计划、版本和共享测试向量
-├─ infra/                     Docker Compose 与 MySQL 约定
-├─ scripts/                   统一校验、测试、构建和打包
-├─ docs/                      交接、安全、测试与 E2E 状态
-└─ artifacts/                 后续统一构建产物（默认不提交）
+├─ apps/android/       Android 客户端（Kotlin、Jetpack Compose、Room）
+├─ apps/windows/       Windows 客户端（.NET 8、WPF、SQLite）
+├─ services/backend/   云同步服务（FastAPI、SQLAlchemy、Alembic、MySQL 8）
+├─ contracts/          OpenAPI、默认计划和跨端规则测试数据
+├─ infra/              Docker Compose 与 MySQL 配置
+├─ scripts/            测试、构建和打包脚本
+└─ docs/               架构、安全、测试和构建说明
 ```
 
-## 权威契约
+各模块的详细说明：
 
-- API：`contracts/openapi.yaml`，由 FastAPI 运行时导出。
-- Schema/API 版本：`contracts/schema-version.json`。
-- 默认计划：`contracts/default-training-plan.json`，由 `default-training-plan.schema.json` 校验。
-- 推荐与进阶规则：`contracts/examples/*.json`。
+- [Android 客户端](apps/android/README.md)
+- [Windows 客户端](apps/windows/README.md)
+- [后端服务](services/backend/README.md)
+- [完整构建说明](docs/build-and-release.md)
 
-默认计划固定为 `beginner_recomp_ab_v1` / v1：A、B 各 8 个位置，共 79 个位置选项、66 个全局动作 UUID 和 52 个器械 UUID。三端随包计划文件必须与根文件逐字一致。
+## 直接下载个人使用版
+
+每次向 GitHub 推送提交或 tag，Actions 都会自动运行测试并生成构建产物。打开仓库的 **Actions** 页面，进入成功的 `ci` 任务，在页面底部下载：
+
+- `android-debug-and-reports`：包含可直接安装的 Debug APK 和 Android 检查报告。
+- `windows-publish-and-results`：包含 `PersonalFitnessPlanner.exe`、Windows 自包含发布目录和测试结果。
+
+如果只是想保留一个版本节点，可以打 tag：
+
+```powershell
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0
+```
+
+tag 会触发同一套 CI，但不会自动创建 GitHub Release，也不会自动修改应用内部版本号。
+
+### 安装提示
+
+- Android 产物是 Debug APK，适合个人安装。如果手机上已经安装了签名不同的同包名应用，需要先卸载旧版本。
+- Windows EXE 是 `win-x64` 自包含程序，不需要预装 .NET Runtime；因为没有代码签名，首次运行时 Windows 可能显示 SmartScreen 提示。
+- Actions 构建产物来自私有仓库，只有有权限的 GitHub 账号可以下载。
+
+## 本地启动云同步服务
+
+需要 Docker Engine 和 Docker Compose。首次启动会在本地生成不提交到 Git 的 `.env`，其中包含随机数据库密码和 JWT 密钥：
+
+```powershell
+.\scripts\bootstrap-dev.ps1
+```
+
+也可以手动复制 `.env.example`，填写必要配置后启动：
+
+```powershell
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build
+```
+
+默认情况下：
+
+- API 监听 `http://127.0.0.1:8000`。
+- MySQL 只在 Docker 内部网络中开放，不映射到宿主机。
+- 数据保存在 Docker volume `personal_fitness_planner_mysql_data` 中。
+
+这个 HTTP 地址适合浏览器、接口调试工具和同机运行的 Windows 客户端。Android 客户端只接受 HTTPS，即使是 Debug APK 或 `localhost` 也不会放行明文 HTTP。若要让 Android 连接自建后端，需要在 API 前配置带可信证书的 HTTPS 反向代理，并在应用中填写对应的 HTTPS 地址。
+
+## 本地测试与构建
+
+### 全部检查
+
+在 Windows PowerShell 中运行：
+
+```powershell
+.\scripts\test-all.ps1
+.\scripts\build-all.ps1
+```
+
+`build-all.ps1` 会构建 Android、Windows 和后端镜像，并将可用文件与 SHA-256 清单汇总到本地 `artifacts/`。完整前置条件和参数见[构建说明](docs/build-and-release.md)。
+
+### Android
+
+需要 JDK 17 或 21、Android SDK Platform 35 和 Build Tools 35.0.0。
+
+```powershell
+cd apps\android
+.\gradlew.bat test
+.\gradlew.bat lint --max-workers=1
+.\gradlew.bat assembleDebug
+```
+
+### Windows
+
+需要 Windows 10/11 x64 和 .NET 8 SDK。
+
+```powershell
+dotnet restore apps\windows\PersonalFitnessPlanner.sln
+dotnet test apps\windows\PersonalFitnessPlanner.sln -c Release
+.\apps\windows\scripts\publish.ps1
+```
+
+### Backend
+
+需要 Python 3.12。建议先在 `services/backend` 中创建虚拟环境并安装开发依赖：
+
+```powershell
+cd services\backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest -m "not mysql"
+```
+
+## 自动检查
+
+GitHub Actions 当前会执行：
+
+- 共享契约校验和敏感信息扫描。
+- Backend Ruff、Mypy、快速测试、MySQL 8 迁移与种子测试、OpenAPI 漂移检查。
+- Backend 锁定依赖的 Python 漏洞审计，以及 Windows 直接/传递 NuGet 依赖的 high/critical 漏洞门禁。
+- Android 单元测试、Lint 和 Debug APK 构建。
+- Windows Restore、Release 构建、测试、自包含发布和启动检查。
+
+本轮安全修复提交后的完整状态以 GitHub Actions 结果为准；不要仅凭本地部分测试判断 APK/EXE 已可发布。CI 配置位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，依赖更新检查位于 [`.github/dependabot.yml`](.github/dependabot.yml)。
+
+## 跨端契约
+
+三端共同使用以下文件，修改后需要同步校验：
+
+- [`contracts/openapi.yaml`](contracts/openapi.yaml)：API 接口定义。
+- [`contracts/default-training-plan.json`](contracts/default-training-plan.json)：内置训练计划。
+- [`contracts/schema-version.json`](contracts/schema-version.json)：API 与数据结构版本。
+- [`contracts/examples/`](contracts/examples/)：推荐和重量进阶规则的共享测试数据。
 
 修改契约后运行：
 
@@ -30,72 +155,18 @@ PersonalFitnessPlannerCloud/
 .\scripts\validate-contracts.ps1
 ```
 
-若系统没有可直接调用的 `python`，向脚本显式传入 Python 3.12 路径，例如
-`.\scripts\validate-contracts.ps1 -Python C:\path\to\python.exe`。
+## 数据与隐私
 
-## 本地后端
+- 客户端不会直接连接 MySQL，也不会保存数据库账号。
+- 本地训练数据默认只保存在当前设备；启用云同步后才会上传到自己部署的后端。
+- `.env`、Android `local.properties`、签名文件、数据库文件和构建产物均已加入 `.gitignore`。
+- 不要把真实密码、JWT 密钥、Android 签名文件或个人训练数据库提交到 Git。
+- 更换账号时，客户端会先检查未同步记录，避免把前一个账号的数据上传到新账号。
 
-要求 Docker Engine/Compose 和 Python 3.12。首次启动脚本会生成不提交的根 `.env`，使用随机本地密码和 JWT 密钥：
+## 更多文档
 
-```powershell
-.\scripts\bootstrap-dev.ps1
-```
-
-等价的 Compose 入口：
-
-```powershell
-docker compose --env-file .env -f infra/docker-compose.yml up -d --build
-```
-
-后端默认监听 `127.0.0.1:8000`，MySQL 3306 不发布到宿主机；持久卷名为 `personal_fitness_planner_mysql_data`。生产环境必须在受信任的 TLS 终止代理后部署 API。
-
-## 独立测试与构建
-
-后端：
-
-```powershell
-cd services/backend
-python -m pytest
-python -m scripts.export_openapi
-```
-
-Android：
-
-```powershell
-cd apps/android
-.\gradlew.bat test
-.\gradlew.bat lint --max-workers=1
-.\gradlew.bat assembleDebug
-.\gradlew.bat assembleRelease
-```
-
-Windows：
-
-```powershell
-dotnet restore apps/windows/PersonalFitnessPlanner.sln
-dotnet build apps/windows/PersonalFitnessPlanner.sln -c Release
-dotnet test apps/windows/PersonalFitnessPlanner.sln -c Release
-.\apps\windows\scripts\publish.ps1
-```
-
-统一入口：
-
-```powershell
-.\scripts\test-all.ps1
-.\scripts\build-all.ps1
-```
-
-`build-all.ps1` 会顺序执行门禁并调用 `package-release.ps1`，最终把 APK、EXE、后端部署文件、契约和 SHA-256 清单放入 `artifacts/`。
-
-## 当前交付阶段
-
-本轮按项目安排完成源码、契约与同步边界整合。根契约/安全/脚本门禁、backend 55 项快速测试、Windows 74 项 xUnit 与 WPF 编译均已通过；Android 本轮没有形成完整 Gradle 测试结果。新的统一 APK、EXE、Docker 镜像、真实 MySQL 测试和三端 E2E 留到后续统一构建阶段；现有历史产物仍位于原始 `01_Android_APK` / `02_Windows_EXE` 交接目录，不冒充本仓库的新构建结果。
-
-详细状态：
-
-- `docs/source-handoff.md`
-- `docs/security-review.md`
-- `docs/test-report.md`
-- `docs/e2e-report.md`
-- `docs/build-and-release.md`
-- `AGENTS.md`
+- [源码与模块说明](docs/source-handoff.md)
+- [安全说明](docs/security-review.md)
+- [测试记录](docs/test-report.md)
+- [端到端测试范围](docs/e2e-report.md)
+- [构建与产物说明](docs/build-and-release.md)

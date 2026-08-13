@@ -615,7 +615,7 @@ def create_assignment(
     payload: AssignmentCreate,
     *,
     actor_user_id: str,
-) -> PlanAssignment:
+) -> tuple[PlanAssignment, list[PlanAssignment]]:
     assignment_user_id = str(payload.user_id) if payload.user_id else actor_user_id
     user = require_active(db, User, assignment_user_id, for_update=True)
     if not user.is_active:
@@ -642,6 +642,7 @@ def create_assignment(
             [{"code": "status_invalid", "path": "status", "message": "Assignment status is invalid"}]
         )
 
+    previous: list[PlanAssignment] = []
     if status == "active":
         previous = list(
             db.scalars(
@@ -651,6 +652,7 @@ def create_assignment(
                     PlanAssignment.status == "active",
                     PlanAssignment.deleted_at.is_(None),
                 )
+                .order_by(PlanAssignment.starts_on, PlanAssignment.id)
                 .with_for_update()
             ).all()
         )
@@ -678,7 +680,7 @@ def create_assignment(
     )
     db.add(assignment)
     db.flush()
-    return assignment
+    return assignment, previous
 
 
 def _version_for_tree_entity(session: Session, entity: Any) -> PlanVersion | None:

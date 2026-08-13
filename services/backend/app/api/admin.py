@@ -46,6 +46,7 @@ from app.schemas.admin import (
     PlanVersionPublish,
     SyncStatusResponse,
 )
+from app.schemas.plans import PlanAssignmentOut
 from app.services.plans import (
     PlanValidationError,
     PublishedPlanImmutableError,
@@ -55,6 +56,7 @@ from app.services.plans import (
     publish_plan_version,
     serialize_plan_version,
 )
+from app.services.serialization import assignment_to_dict
 
 
 router = APIRouter(
@@ -743,7 +745,11 @@ def publish_version(
         )
 
 
-@router.post("/assignments", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/assignments",
+    status_code=status.HTTP_201_CREATED,
+    response_model=PlanAssignmentOut,
+)
 def assign_plan(
     payload: AssignmentCreate,
     request: Request,
@@ -751,17 +757,55 @@ def assign_plan(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Any]:
     try:
-        assignment = create_assignment(db, payload, actor_user_id=current_user.id)
-        after = entity_dict(assignment)
+        assignment, previous_assignments = create_assignment(
+            db, payload, actor_user_id=current_user.id
+        )
+        audit_after = entity_dict(assignment)
+        after = PlanAssignmentOut.model_validate(
+            assignment_to_dict(assignment)
+        ).model_dump(mode="json")
+        plan_after = serialize_plan_version(assignment.plan_version)
         add_audit_log(
             db,
             actor_user_id=current_user.id,
             action="admin.assignment.create",
             entity_type="plan_assignment",
             entity_id=assignment.id,
-            after=after,
+            after=audit_after,
             **_request_context(request),
         )
+        # An active assignment supersedes every prior active row for the same
+        # user. Emit those canonical updates first so incremental clients
+        # converge before they activate the replacement assignment.
+        for previous in previous_assignments:
+            add_sync_change(
+                db,
+                entity_type="plan_assignment",
+                entity_id=previous.id,
+                entity_version=previous.version,
+                operation="update",
+                payload=PlanAssignmentOut.model_validate(
+                    assignment_to_dict(previous)
+                ).model_dump(mode="json"),
+                actor_user_id=current_user.id,
+                request_id=request.headers.get("X-Request-ID"),
+            )
+        db.flush()
+        # Publishing may have happened long before this user's latest cursor.
+        # Re-emit the immutable full plan snapshot now that the assignment makes
+        # it visible. Flush it before the new assignment so clients always apply
+        # the plan tree before the assignment that references it.
+        add_sync_change(
+            db,
+            entity_type="plan_version",
+            entity_id=assignment.plan_version_id,
+            entity_version=assignment.plan_version.version,
+            operation="update",
+            payload=plan_after,
+            actor_user_id=current_user.id,
+            request_id=request.headers.get("X-Request-ID"),
+        )
+        db.flush()
         add_sync_change(
             db,
             entity_type="plan_assignment",

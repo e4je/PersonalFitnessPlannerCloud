@@ -1,6 +1,6 @@
 # 测试与校验报告
 
-日期：2026-08-11。本文只把在统一源码上实际执行过的检查标记为通过。
+日期：2026-08-13。本文只把在统一源码上实际执行过的检查标记为通过。
 
 ## 本轮实际执行
 
@@ -12,8 +12,10 @@
 | OpenAPI 快照 | 通过 | backend 运行时导出与根 `contracts/openapi.yaml` 一致 |
 | Secret scan | 通过 | 未发现提交的密钥、令牌、私钥或 `.env` |
 | 根 PowerShell / POSIX 脚本语法 | 通过 | PowerShell parser 与 `bash -n` |
-| Backend pytest | **55 passed / 1 skipped** | skipped 为未设置 `TEST_DATABASE_URL` 的真实 MySQL 8 测试；另有 1 个 Starlette/httpx 弃用警告 |
-| Windows xUnit / WPF build | **74/74；0 warning / 0 error** | 最终统一源码；测试与编译输出只写入已清理的 TEMP 副本 |
+| Backend pytest | **72 passed / 1 deselected** | deselected 为未在本地运行的真实 MySQL 8 标记测试 |
+| Python 生产依赖审计 | 通过 | 对带 hash 的 `requirements.lock` 执行 `pip-audit --strict --require-hashes --disable-pip`，未发现已知漏洞 |
+| Windows xUnit / WPF build | **89/89；0 warning / 0 error** | 最终统一源码；包括 API 错误脱敏、日志保留、origin、导入/导出与 SQLite 运行时门禁 |
+| Windows NuGet 审计 | 通过 | 直接与传递依赖未发现已知漏洞；high/critical 告警已设为还原错误 |
 | Android 编译/测试 | 部分执行 | JDK 21 下 main/test 源码编译阶段通过；Gradle test worker 因中文分发路径未启动，ASCII 路径重试又被桌面用量限制拒绝，不能记为测试通过 |
 | 源码树清洁度 | 通过 | 0 个 `build/bin/obj/.gradle/.kotlin/.venv/.packages/TestResults`，0 个 APK/EXE/本机配置 |
 
@@ -31,7 +33,7 @@ Backend 测试使用原始交付的隔离 Python 虚拟环境作为依赖解释�
 
 1. 配置 disposable MySQL 8，运行 Alembic upgrade、canonical seed 重入及 `pytest -m mysql`。
 2. Android `test`、`lint`、`assembleDebug`、`assembleRelease` 与 Room migration；避免含中文的 Gradle 分发/临时路径。
-3. Windows Release publish、中文空格路径非管理员 EXE smoke 与最终代码签名；74 项测试已在源码整合阶段通过。
+3. Windows Release publish、中文空格路径非管理员 EXE smoke 与最终代码签名；89 项测试已在源码整合阶段通过。
 4. Docker Compose 构建、启动、重启和命名数据卷持久化。
 5. `docs/e2e-report.md` 的 17 项真实跨端验收。
 6. 对最终 APK/EXE/镜像生成 SHA-256，并完成签名、SBOM 和二进制安全扫描。

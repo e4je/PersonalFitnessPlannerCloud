@@ -23,8 +23,9 @@ from app.models import (
     User,
     WorkoutSession,
 )
-from app.seed.default_plan import seed_default_plan
+from app.schemas.plans import PlanAssignmentOut
 from app.seed.default_data import CANONICAL_PLAN
+from app.seed.default_plan import seed_default_plan
 
 
 def test_default_seed_has_canonical_counts_and_is_idempotent(db_session: Session) -> None:
@@ -166,12 +167,36 @@ def test_bootstrap_returns_authoritative_catalog_and_current_plan(
     assert len(payload["exercises"]) == 66
     assert len(payload["equipment"]) == 52
     assert len(payload["assignments"]) == 1
+    assignment = payload["assignments"][0]
+    assert PlanAssignmentOut.model_validate(assignment)
+    assert assignment["start_local_date"] == date.today().isoformat()
+    assert assignment["end_local_date"] is None
+    assert assignment["is_active"] is True
     assert payload["cursor"] == payload["sync_cursor"]
     assert payload["api_version"]
     assert payload["schema_version"]
 
 
-def test_bootstrap_includes_every_plan_version_referenced_by_assignments(
+def test_bootstrap_uses_system_plan_fallback_without_assignment(
+    client: TestClient,
+    db_session: Session,
+    user_headers: dict[str, str],
+) -> None:
+    seeded = seed_default_plan(db_session)
+
+    response = client.get("/api/v1/bootstrap", headers=user_headers)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["assignments"] == []
+    assert payload["current_plan"]["id"] == seeded["plan_version_id"]
+    assert payload["plan_version"]["id"] == seeded["plan_version_id"]
+    assert {item["id"] for item in payload["plan_versions"]} == {
+        seeded["plan_version_id"]
+    }
+
+
+def test_bootstrap_excludes_expired_private_assignment_and_plan_snapshot(
     client: TestClient,
     db_session: Session,
     normal_user: User,
@@ -180,10 +205,15 @@ def test_bootstrap_includes_every_plan_version_referenced_by_assignments(
     seeded = seed_default_plan(db_session)
     current_version = db_session.get(PlanVersion, seeded["plan_version_id"])
     assert current_version is not None
+    historical_plan = TrainingPlan(
+        name="Expired private plan",
+        is_system=False,
+        is_active=True,
+    )
     historical_version = PlanVersion(
-        training_plan_id=current_version.training_plan_id,
-        version_number=current_version.version_number + 1,
-        status="archived",
+        plan=historical_plan,
+        version_number=1,
+        status="published",
         weekly_frequency=2,
         min_rest_days=1,
         fatigue_threshold=7,
@@ -191,7 +221,7 @@ def test_bootstrap_includes_every_plan_version_referenced_by_assignments(
         initial_set_count=1,
         config_json={},
     )
-    db_session.add(historical_version)
+    db_session.add(historical_plan)
     db_session.flush()
     db_session.add_all(
         [
@@ -221,8 +251,9 @@ def test_bootstrap_includes_every_plan_version_referenced_by_assignments(
     assignment_version_ids = {item["plan_version_id"] for item in payload["assignments"]}
     bootstrap_version_ids = {item["id"] for item in payload["plan_versions"]}
     assert payload["current_plan"]["id"] == current_version.id
-    assert assignment_version_ids == {current_version.id, historical_version.id}
-    assert assignment_version_ids <= bootstrap_version_ids
+    assert assignment_version_ids == {current_version.id}
+    assert bootstrap_version_ids == {current_version.id}
+    assert historical_version.id not in bootstrap_version_ids
 
 
 def test_bootstrap_returns_complete_active_personal_history(
@@ -331,6 +362,10 @@ def test_openapi_contains_required_contract_and_auth_scheme(client: TestClient) 
     assert required_paths.issubset(document["paths"])
     security_schemes = document["components"]["securitySchemes"]
     assert any(item.get("scheme") == "bearer" for item in security_schemes.values())
+    assignment_response = document["paths"]["/api/v1/admin/assignments"]["post"][
+        "responses"
+    ]["201"]["content"]["application/json"]["schema"]
+    assert assignment_response["$ref"].endswith("/PlanAssignmentOut")
     assert document["info"]["version"]
 
 

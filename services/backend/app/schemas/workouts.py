@@ -11,6 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 _IANA_ZONE_PATTERN = re.compile(r"^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)+$")
+_EXPECTED_VERSION_DESCRIPTION = (
+    "Compatibility-period optimistic concurrency token. New entities and legacy clients may "
+    "omit it; updates that provide it are checked atomically against the last server version. "
+    "Clients should send the version from their latest server copy."
+)
 
 
 class ApiModel(BaseModel):
@@ -39,7 +44,11 @@ class WorkoutSetUpsert(ApiModel):
     completed: bool = False
     completed_at: datetime | None = None
     deleted_at: datetime | None = None
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: int | None = Field(
+        default=None,
+        ge=1,
+        description=_EXPECTED_VERSION_DESCRIPTION,
+    )
 
     @field_validator("set_type")
     @classmethod
@@ -70,7 +79,11 @@ class WorkoutSessionUpsert(ApiModel):
     notes: str | None = Field(default=None, max_length=10_000)
     sets: list[WorkoutSetUpsert] = Field(default_factory=list, max_length=1000)
     deleted_at: datetime | None = None
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: int | None = Field(
+        default=None,
+        ge=1,
+        description=_EXPECTED_VERSION_DESCRIPTION,
+    )
 
     @field_validator("timezone")
     @classmethod
@@ -149,7 +162,11 @@ class WorkoutSessionPatch(ApiModel):
     notes: str | None = Field(default=None, max_length=10_000)
     sets: list[WorkoutSetUpsert] | None = Field(default=None, max_length=1000)
     deleted_at: datetime | None = None
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: int | None = Field(
+        default=None,
+        ge=1,
+        description=_EXPECTED_VERSION_DESCRIPTION,
+    )
 
     @field_validator("timezone")
     @classmethod
@@ -274,7 +291,9 @@ class WorkoutSessionPage(ApiModel):
 
 class ReadinessUpsert(ApiModel):
     id: UUID
-    local_date: date
+    local_date: date = Field(
+        description="Immutable per-entry local date; create a new UUID for another date."
+    )
     fatigue_score: int = Field(ge=1, le=10)
     sleep_quality: int | None = Field(default=None, ge=1, le=5)
     pain_notes: str | None = Field(default=None, max_length=4000)
@@ -283,7 +302,11 @@ class ReadinessUpsert(ApiModel):
     motivation: int | None = Field(default=None, ge=1, le=5)
     notes: str | None = Field(default=None, max_length=4000)
     metrics: dict[str, Any] = Field(default_factory=dict)
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: int | None = Field(
+        default=None,
+        ge=1,
+        description=_EXPECTED_VERSION_DESCRIPTION,
+    )
 
 
 class ReadinessOut(ApiModel):
@@ -313,7 +336,10 @@ class ReadinessPage(ApiModel):
 
 class CardioSessionUpsert(ApiModel):
     id: UUID
-    client_id: UUID | None = None
+    client_id: UUID | None = Field(
+        default=None,
+        description="Immutable idempotent client identity; defaults to id on creation.",
+    )
     source: str = Field(default="android", max_length=32)
     source_device: str | None = Field(default=None, max_length=32)
     client_version: str | None = Field(default=None, max_length=64)
@@ -331,7 +357,11 @@ class CardioSessionUpsert(ApiModel):
     completed_at: datetime | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     deleted_at: datetime | None = None
-    expected_version: int | None = Field(default=None, ge=1)
+    expected_version: int | None = Field(
+        default=None,
+        ge=1,
+        description=_EXPECTED_VERSION_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def normalize_compatibility_fields(self) -> Self:

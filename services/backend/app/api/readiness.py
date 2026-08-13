@@ -90,21 +90,41 @@ def apply_readiness_upsert(
     payload: ReadinessUpsert,
 ) -> ReadinessOut:
     item_id = str(payload.id)
-    item = db.get(DailyReadiness, item_id)
-    if item is not None and item.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Readiness entry not found")
-
-    same_date = db.scalar(
-        select(DailyReadiness).where(
-            DailyReadiness.user_id == user.id,
-            DailyReadiness.local_date == payload.local_date,
-        )
+    # Readiness identity is the user's local date. Keep it immutable for
+    # existing rows so concurrent updates always lock one canonical key and
+    # cannot deadlock while swapping unique dates.
+    existing = db.get(
+        DailyReadiness,
+        item_id,
+        populate_existing=True,
+        with_for_update=True,
     )
-    if same_date is not None and same_date.id != item_id:
+    if existing is not None and existing.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Readiness entry not found")
+    if existing is not None and existing.local_date != payload.local_date:
         _readiness_conflict(
             db,
             user_id=user.id,
-            item=same_date,
+            item=existing,
+            payload=payload,
+            reason="readiness_date_immutable",
+        )
+    item = db.scalar(
+        select(DailyReadiness)
+        .where(
+            DailyReadiness.user_id == user.id,
+            DailyReadiness.local_date == payload.local_date,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if item is None and existing is not None:
+        item = existing
+    if item is not None and item.id != item_id:
+        _readiness_conflict(
+            db,
+            user_id=user.id,
+            item=item,
             payload=payload,
             reason="readiness_date_conflict",
         )
@@ -134,7 +154,6 @@ def apply_readiness_upsert(
                 server_copy=serialize_readiness(item).model_dump(mode="json"),
                 attempted=payload.model_dump(mode="json"),
             )
-        item.local_date = payload.local_date
         item.fatigue = payload.fatigue_score
         item.sleep_quality = payload.sleep_quality
         item.soreness = payload.soreness

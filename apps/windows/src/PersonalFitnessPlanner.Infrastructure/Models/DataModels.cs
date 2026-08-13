@@ -158,7 +158,8 @@ public sealed record StoredTokens(
     string AccessToken,
     string RefreshToken,
     DateTimeOffset? ExpiresAt,
-    string DisplayName = "");
+    string DisplayName = "",
+    string ApiOrigin = "");
 
 public sealed record OutboxItem(
     Guid Id,

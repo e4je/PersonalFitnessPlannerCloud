@@ -14,10 +14,21 @@ public sealed record SyncBatchResult(
 
 public sealed class FitnessApiClient
 {
+    private const int MaxErrorBodyBytes = 32 * 1024;
+    private const int MaxSafeErrorFieldLength = 300;
+    private static readonly string[] SafeErrorFieldNames = ["code", "message", "detail"];
+    private static readonly string[] SensitiveErrorTerms =
+    [
+        "authorization", "password", "passwd", "secret", "token", "credential", "input",
+        "api_key", "apikey", "access_key", "refresh", "bearer", "cookie", "session"
+    ];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient;
     private readonly DpapiTokenStore _tokens;
+    private readonly SemaphoreSlim _configurationGate = new(1, 1);
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private Uri? _baseAddress;
+    private string? _apiOrigin;
 
     public FitnessApiClient(HttpClient httpClient, DpapiTokenStore tokens)
     {
@@ -26,17 +37,48 @@ public sealed class FitnessApiClient
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
-    public void ConfigureBaseAddress(string apiBaseUrl)
+    public Uri? BaseAddress => _baseAddress;
+
+    public void ConfigureBaseAddress(string apiBaseUrl) =>
+        ConfigureBaseAddressAsync(apiBaseUrl).GetAwaiter().GetResult();
+
+    public async Task ConfigureBaseAddressAsync(
+        string apiBaseUrl,
+        CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var address) || address.Scheme is not ("http" or "https"))
+        if (!TryValidateBaseAddress(apiBaseUrl, out var address))
         {
-            throw new ArgumentException("API 地址必须是 HTTP(S) 绝对地址。", nameof(apiBaseUrl));
+            throw new ArgumentException(
+                "API 地址必须是无账号、查询参数和片段的 HTTP(S) 绝对地址。",
+                nameof(apiBaseUrl));
         }
         if (address.Scheme == "http" && !IsLoopbackHost(address))
         {
             throw new ArgumentException("非本机 API 必须使用 HTTPS。", nameof(apiBaseUrl));
         }
-        _httpClient.BaseAddress = new Uri(address.AbsoluteUri.TrimEnd('/') + "/");
+
+        var baseAddress = new Uri(address.AbsoluteUri.TrimEnd('/') + "/");
+        var origin = NormalizeOrigin(baseAddress);
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Credentials are valid only for the exact scheme/host/effective-port
+            // that issued them. Legacy credentials have no origin and fail closed.
+            var stored = await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false);
+            if (stored is not null && !IsBoundToOrigin(stored, origin))
+            {
+                // Remove the old credential before exposing the new base address to
+                // callers, so a concurrent request cannot send it to the new host.
+                await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            _baseAddress = baseAddress;
+            _apiOrigin = origin;
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
     }
 
     public async Task<AuthenticationState> LoginAsync(
@@ -46,24 +88,37 @@ public sealed class FitnessApiClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
-        EnsureConfigured();
-        using var response = await _httpClient.PostAsJsonAsync(
-            "api/v1/auth/login", new { email = email.Trim(), password }, JsonOptions, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        var tokens = await ReadTokensAsync(response, null, cancellationToken).ConfigureAwait(false);
-        await _tokens.SaveAsync(tokens, cancellationToken).ConfigureAwait(false);
-        return JwtRoleParser.ToAuthenticationState(tokens);
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureConfigured();
+            using var response = await _httpClient.PostAsJsonAsync(
+                ResolveUri("api/v1/auth/login"), new { email = email.Trim(), password }, JsonOptions, cancellationToken).ConfigureAwait(false);
+            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+            var tokens = await ReadTokensAsync(response, null, CurrentOrigin(), cancellationToken).ConfigureAwait(false);
+            await _tokens.SaveAsync(tokens, cancellationToken).ConfigureAwait(false);
+            return JwtRoleParser.ToAuthenticationState(tokens);
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
     }
 
     public async Task LogoutAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            if (_httpClient.BaseAddress is not null && await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false) is { } stored)
+            if (_baseAddress is not null &&
+                (await GetAuthenticationStateAsync(cancellationToken).ConfigureAwait(false)).IsAuthenticated)
             {
-                var body = JsonSerializer.SerializeToUtf8Bytes(new { refresh_token = stored.RefreshToken }, JsonOptions);
                 using var response = await SendAuthorizedAsync(
-                    () => JsonRequest(HttpMethod.Post, "api/v1/auth/logout", body), cancellationToken).ConfigureAwait(false);
+                    stored =>
+                    {
+                        var body = JsonSerializer.SerializeToUtf8Bytes(
+                            new { refresh_token = stored.RefreshToken }, JsonOptions);
+                        return JsonRequest(HttpMethod.Post, "api/v1/auth/logout", body);
+                    }, cancellationToken).ConfigureAwait(false);
                 // Logout is best effort; local credentials are always removed.
             }
         }
@@ -74,7 +129,21 @@ public sealed class FitnessApiClient
     }
 
     public async Task<AuthenticationState> GetAuthenticationStateAsync(CancellationToken cancellationToken = default) =>
-        JwtRoleParser.ToAuthenticationState(await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false));
+        JwtRoleParser.ToAuthenticationState(await LoadCurrentTokensAsync(cancellationToken).ConfigureAwait(false));
+
+    internal async Task<StoredTokens?> LoadCurrentTokensAsync(CancellationToken cancellationToken = default)
+    {
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureConfigured();
+            return await LoadBoundTokensUnsafeAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
+    }
 
     public async Task<SyncBatchResult> SendBatchAsync(
         IReadOnlyList<OutboxItem> items,
@@ -99,7 +168,7 @@ public sealed class FitnessApiClient
             sent_at = DateTimeOffset.UtcNow,
             operations
         }, JsonOptions);
-        using var response = await SendAuthorizedAsync(() =>
+        using var response = await SendAuthorizedAsync(_ =>
             {
                 var request = JsonRequest(HttpMethod.Post, "api/v1/sync/batch", body);
                 request.Headers.TryAddWithoutValidation("Idempotency-Key", $"sync-batch:{batchId:D}");
@@ -177,7 +246,7 @@ public sealed class FitnessApiClient
         var relative = string.IsNullOrWhiteSpace(cursor)
             ? "api/v1/sync/changes"
             : $"api/v1/sync/changes?cursor={Uri.EscapeDataString(cursor)}";
-        using var response = await SendAuthorizedAsync(() => new HttpRequestMessage(HttpMethod.Get, relative), cancellationToken)
+        using var response = await SendAuthorizedAsync(_ => new HttpRequestMessage(HttpMethod.Get, relative), cancellationToken)
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
@@ -218,7 +287,7 @@ public sealed class FitnessApiClient
     {
         EnsureConfigured();
         using var response = await SendAuthorizedAsync(
-            () => new HttpRequestMessage(HttpMethod.Get, "api/v1/bootstrap"), cancellationToken).ConfigureAwait(false);
+            _ => new HttpRequestMessage(HttpMethod.Get, "api/v1/bootstrap"), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
         var root = document.RootElement;
@@ -236,14 +305,13 @@ public sealed class FitnessApiClient
         string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
     {
-        var stored = await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false);
-        if (!JwtRoleParser.ToAuthenticationState(stored).IsAdmin)
+        if (!(await GetAuthenticationStateAsync(cancellationToken).ConfigureAwait(false)).IsAdmin)
         {
             throw new UnauthorizedAccessException("管理操作要求后端 JWT 中的 admin 角色声明。");
         }
         var bytes = body is null ? null : JsonSerializer.SerializeToUtf8Bytes(body, JsonOptions);
         using var response = await SendAuthorizedAsync(
-            () =>
+            _ =>
             {
                 var request = bytes is null ? new HttpRequestMessage(method, relativeUrl) : JsonRequest(method, relativeUrl, bytes);
                 if (!string.IsNullOrWhiteSpace(idempotencyKey)) request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
@@ -370,52 +438,62 @@ public sealed class FitnessApiClient
     }
 
     private async Task<HttpResponseMessage> SendAuthorizedAsync(
-        Func<HttpRequestMessage> requestFactory,
+        Func<StoredTokens, HttpRequestMessage> requestFactory,
         CancellationToken cancellationToken)
     {
-        EnsureConfigured();
-        var stored = await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false)
-            ?? throw new UnauthorizedAccessException("请先登录后再同步。");
-        using var firstRequest = requestFactory();
-        firstRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", stored.AccessToken);
-        var response = await _httpClient.SendAsync(firstRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-        if (response.StatusCode != HttpStatusCode.Unauthorized)
-        {
-            return response;
-        }
-
-        if (string.IsNullOrWhiteSpace(stored.RefreshToken))
-        {
-            await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
-            return response;
-        }
-
-        response.Dispose();
-        StoredTokens refreshed;
+        await _configurationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            refreshed = await RefreshAsync(stored, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+            EnsureConfigured();
+            var stored = await LoadBoundTokensUnsafeAsync(cancellationToken).ConfigureAwait(false)
+                ?? throw new UnauthorizedAccessException("请先登录后再同步。");
+            using var firstRequest = requestFactory(stored);
+            PrepareRequestUri(firstRequest);
+            firstRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", stored.AccessToken);
+            var response = await _httpClient.SendAsync(firstRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.Unauthorized)
+            {
+                return response;
+            }
 
-        using var retry = requestFactory();
-        retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", refreshed.AccessToken);
-        var retryResponse = await _httpClient.SendAsync(retry, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-        if (retryResponse.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(stored.RefreshToken))
+            {
+                await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
+                return response;
+            }
+
+            response.Dispose();
+            StoredTokens refreshed;
+            try
+            {
+                refreshed = await RefreshAsync(stored, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+
+            using var retry = requestFactory(refreshed);
+            PrepareRequestUri(retry);
+            retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", refreshed.AccessToken);
+            var retryResponse = await _httpClient.SendAsync(retry, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            if (retryResponse.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            return retryResponse;
         }
-        return retryResponse;
+        finally
+        {
+            _configurationGate.Release();
+        }
     }
 
     private async Task<StoredTokens> RefreshAsync(StoredTokens previous, CancellationToken cancellationToken)
@@ -423,15 +501,15 @@ public sealed class FitnessApiClient
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var current = await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false);
+            var current = await LoadBoundTokensUnsafeAsync(cancellationToken).ConfigureAwait(false);
             if (current is not null && current.AccessToken != previous.AccessToken)
             {
                 return current;
             }
             using var response = await _httpClient.PostAsJsonAsync(
-                "api/v1/auth/refresh", new { refresh_token = previous.RefreshToken }, JsonOptions, cancellationToken).ConfigureAwait(false);
+                ResolveUri("api/v1/auth/refresh"), new { refresh_token = previous.RefreshToken }, JsonOptions, cancellationToken).ConfigureAwait(false);
             await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-            var refreshed = await ReadTokensAsync(response, previous, cancellationToken).ConfigureAwait(false);
+            var refreshed = await ReadTokensAsync(response, previous, CurrentOrigin(), cancellationToken).ConfigureAwait(false);
             await _tokens.SaveAsync(refreshed, cancellationToken).ConfigureAwait(false);
             return refreshed;
         }
@@ -444,6 +522,7 @@ public sealed class FitnessApiClient
     private static async Task<StoredTokens> ReadTokensAsync(
         HttpResponseMessage response,
         StoredTokens? previous,
+        string apiOrigin,
         CancellationToken cancellationToken)
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
@@ -465,7 +544,7 @@ public sealed class FitnessApiClient
         }
         var displayName = GetString(root, "display_name", "displayName", "name");
         if (string.IsNullOrWhiteSpace(displayName)) displayName = previous?.DisplayName ?? string.Empty;
-        return new StoredTokens(access, refresh, expiresAt, displayName);
+        return new StoredTokens(access, refresh, expiresAt, displayName, apiOrigin);
     }
 
     private static DateTimeOffset? ParseExpiration(JsonElement value)
@@ -498,14 +577,146 @@ public sealed class FitnessApiClient
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode) return;
-        var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (text.Length > 1_000) text = text[..1_000];
-        throw new HttpRequestException($"API 请求失败 ({(int)response.StatusCode} {response.ReasonPhrase}): {text}", null, response.StatusCode);
+        var summary = await ReadSafeErrorSummaryAsync(response, cancellationToken).ConfigureAwait(false);
+        var status = $"API 请求失败 ({(int)response.StatusCode})";
+        throw new HttpRequestException(
+            string.IsNullOrEmpty(summary) ? status + "。" : status + $"：{summary}",
+            null,
+            response.StatusCode);
+    }
+
+    private static async Task<string> ReadSafeErrorSummaryAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (response.Content.Headers.ContentLength is > MaxErrorBodyBytes) return string.Empty;
+            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[4 * 1024];
+            while (true)
+            {
+                var read = await source.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read == 0) break;
+                if (buffer.Length + read > MaxErrorBodyBytes) return string.Empty;
+                buffer.Write(chunk, 0, read);
+            }
+            buffer.Position = 0;
+            using var document = await JsonDocument.ParseAsync(
+                buffer,
+                new JsonDocumentOptions { MaxDepth = 32, AllowTrailingCommas = false },
+                cancellationToken).ConfigureAwait(false);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return string.Empty;
+
+            var fields = new List<string>(SafeErrorFieldNames.Length);
+            foreach (var fieldName in SafeErrorFieldNames)
+            {
+                if (!TryGetDirectProperty(document.RootElement, fieldName, out var value) ||
+                    value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var safeValue = SanitizeErrorField(value.GetString());
+                if (!string.IsNullOrEmpty(safeValue)) fields.Add($"{fieldName}={safeValue}");
+            }
+            return string.Join("；", fields);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or IOException)
+        {
+            // Non-JSON and malformed bodies are intentionally never echoed.
+            return string.Empty;
+        }
+    }
+
+    private static bool TryGetDirectProperty(JsonElement root, string name, out JsonElement value)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+        value = default;
+        return false;
+    }
+
+    private static string SanitizeErrorField(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var normalized = string.Join(' ', value.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        if (SensitiveErrorTerms.Any(term => normalized.Contains(term, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "[REDACTED]";
+        }
+        return normalized.Length <= MaxSafeErrorFieldLength
+            ? normalized
+            : normalized[..MaxSafeErrorFieldLength] + "…";
     }
 
     private void EnsureConfigured()
     {
-        if (_httpClient.BaseAddress is null) throw new InvalidOperationException("尚未配置 API 地址。");
+        if (_baseAddress is null || _apiOrigin is null)
+        {
+            throw new InvalidOperationException("尚未配置 API 地址。");
+        }
+    }
+
+    private Uri ResolveUri(string relativeUrl)
+    {
+        EnsureConfigured();
+        return new Uri(_baseAddress!, relativeUrl);
+    }
+
+    private void PrepareRequestUri(HttpRequestMessage request)
+    {
+        if (request.RequestUri is null)
+        {
+            throw new InvalidOperationException("API 请求缺少地址。");
+        }
+
+        var target = request.RequestUri.IsAbsoluteUri
+            ? request.RequestUri
+            : ResolveUri(request.RequestUri.OriginalString);
+        if (!string.Equals(NormalizeOrigin(target), CurrentOrigin(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("拒绝向已登录 API 之外的源站发送授权请求。");
+        }
+        request.RequestUri = target;
+    }
+
+    private async Task<StoredTokens?> LoadBoundTokensUnsafeAsync(CancellationToken cancellationToken)
+    {
+        var stored = await _tokens.LoadAsync(cancellationToken).ConfigureAwait(false);
+        if (stored is null || IsBoundToOrigin(stored, CurrentOrigin()))
+        {
+            return stored;
+        }
+
+        await _tokens.DeleteAsync(CancellationToken.None).ConfigureAwait(false);
+        return null;
+    }
+
+    private string CurrentOrigin()
+    {
+        EnsureConfigured();
+        return _apiOrigin!;
+    }
+
+    private static bool IsBoundToOrigin(StoredTokens tokens, string origin) =>
+        !string.IsNullOrWhiteSpace(tokens.ApiOrigin) &&
+        string.Equals(tokens.ApiOrigin, origin, StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeOrigin(Uri address)
+    {
+        var host = address.IdnHost.TrimEnd('.').ToLowerInvariant();
+        if (host.Contains(':', StringComparison.Ordinal)) host = $"[{host}]";
+        return $"{address.Scheme.ToLowerInvariant()}://{host}:{address.Port}";
     }
 
     private static bool IsLoopbackHost(Uri address) =>
@@ -513,6 +724,23 @@ public sealed class FitnessApiClient
         string.Equals(address.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(address.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(address.Host, "::1", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool TryValidateBaseAddress(string apiBaseUrl, out Uri address)
+    {
+        if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var parsed) ||
+            parsed.Scheme is not ("http" or "https") ||
+            string.IsNullOrWhiteSpace(parsed.Host) ||
+            !string.IsNullOrEmpty(parsed.UserInfo) ||
+            !string.IsNullOrEmpty(parsed.Query) ||
+            !string.IsNullOrEmpty(parsed.Fragment))
+        {
+            address = null!;
+            return false;
+        }
+
+        address = parsed;
+        return true;
+    }
 
     private static bool TryGetProperty(JsonElement element, out JsonElement value, params string[] names)
     {

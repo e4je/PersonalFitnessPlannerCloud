@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,10 +37,38 @@ def is_skipped(path: Path) -> bool:
     return any(part in SKIP_DIRECTORIES for part in path.parts)
 
 
+def candidate_files(root: Path) -> list[Path]:
+    """Return tracked and non-ignored untracked files when Git is available.
+
+    A developer's ignored ``.env`` is expected to contain real credentials and
+    must not make the repository scanner unusable. Non-ignored new files remain
+    in scope so this still works as a useful pre-commit gate.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return [path for path in root.rglob("*") if path.is_file()]
+
+    return [root / Path(raw.decode("utf-8")) for raw in completed.stdout.split(b"\0") if raw]
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     findings: list[str] = []
-    for path in root.rglob("*"):
+    for path in candidate_files(root):
         relative = path.relative_to(root)
         if is_skipped(relative) or not path.is_file():
             continue

@@ -1068,9 +1068,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties: true
-                type: object
-                title: Response Assign Plan Api V1 Admin Assignments Post
+                $ref: '#/components/schemas/PlanAssignmentOut'
         '422':
           description: Validation Error
           content:
@@ -1528,6 +1526,7 @@ components:
             format: uuid
           - type: 'null'
           title: Client Id
+          description: Immutable idempotent client identity; defaults to id on creation.
         source:
           type: string
           maxLength: 32
@@ -1633,6 +1632,9 @@ components:
             minimum: 1.0
           - type: 'null'
           title: Expected Version
+          description: Compatibility-period optimistic concurrency token. New entities and legacy clients may omit it; updates
+            that provide it are checked atomically against the last server version. Clients should send the version from their
+            latest server copy.
       type: object
       required:
       - id
@@ -3345,6 +3347,7 @@ components:
           type: string
           format: date
           title: Local Date
+          description: Immutable per-entry local date; create a new UUID for another date.
         fatigue_score:
           type: integer
           maximum: 10.0
@@ -3400,6 +3403,9 @@ components:
             minimum: 1.0
           - type: 'null'
           title: Expected Version
+          description: Compatibility-period optimistic concurrency token. New entities and legacy clients may omit it; updates
+            that provide it are checked atomically against the last server version. Clients should send the version from their
+            latest server copy.
       type: object
       required:
       - id
@@ -4079,6 +4085,9 @@ components:
             minimum: 1.0
           - type: 'null'
           title: Expected Version
+          description: Compatibility-period optimistic concurrency token. New entities and legacy clients may omit it; updates
+            that provide it are checked atomically against the last server version. Clients should send the version from their
+            latest server copy.
       type: object
       title: WorkoutSessionPatch
     WorkoutSessionUpsert:
@@ -4209,6 +4218,9 @@ components:
             minimum: 1.0
           - type: 'null'
           title: Expected Version
+          description: Compatibility-period optimistic concurrency token. New entities and legacy clients may omit it; updates
+            that provide it are checked atomically against the last server version. Clients should send the version from their
+            latest server copy.
       type: object
       required:
       - id
@@ -4448,6 +4460,9 @@ components:
             minimum: 1.0
           - type: 'null'
           title: Expected Version
+          description: Compatibility-period optimistic concurrency token. New entities and legacy clients may omit it; updates
+            that provide it are checked atomically against the last server version. Clients should send the version from their
+            latest server copy.
       type: object
       required:
       - id

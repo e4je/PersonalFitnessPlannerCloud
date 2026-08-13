@@ -70,4 +70,4 @@ tests/PersonalFitnessPlanner.Tests          xUnit 自动化测试
 
 ## 验收范围
 
-自动化测试覆盖 A/B 推荐、疲劳恢复、共享规则向量、计划不可变版本、完整同步、跨账号隔离、SQLite v8 migration、Outbox 幂等、管理员角色声明、历史快照、CSV/JSON 导出和中文路径。统一副本最终源码实跑 74/74 与 WPF 0 warning/0 error；Release publish/EXE smoke 留待后续统一构建。
+自动化测试覆盖 A/B 推荐、疲劳恢复、共享规则向量、计划不可变版本、完整同步、跨账号隔离、SQLite v8 migration、Outbox 幂等、管理员角色声明、历史快照、API 错误脱敏、日志保留、CSV/JSON 导出和中文路径。统一副本当前源码实跑 89/89 与 WPF 0 warning/0 error；Release publish/EXE smoke 留待后续统一构建。

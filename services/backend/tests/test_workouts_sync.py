@@ -26,6 +26,7 @@ from app.models import (
     WorkoutSet,
 )
 from app.seed.default_plan import seed_default_plan
+from app.schemas.plans import PlanAssignmentOut
 
 
 def _request_headers(auth: dict[str, str], key: str) -> dict[str, str]:
@@ -257,6 +258,204 @@ def test_private_published_plan_is_visible_only_to_owner_or_assignee(
         for feed in (unrelated, owner_feed, assignee_feed)
         for item in feed.json()["changes"]
     )
+
+
+def test_new_assignment_re_emits_old_private_plan_before_assignment(
+    client: TestClient,
+    db_session: Session,
+    normal_user: User,
+    user_headers: dict[str, str],
+    admin_user: User,
+    admin_headers: dict[str, str],
+    catalog_items: tuple[Any, Any],
+) -> None:
+    exercise, _equipment = catalog_items
+    plan_response = client.post(
+        "/api/v1/admin/plans",
+        headers=admin_headers,
+        json={"name": "Old private plan", "goal": "private"},
+    )
+    assert plan_response.status_code == 201, plan_response.text
+    plan = plan_response.json()
+    version_response = client.post(
+        f"/api/v1/admin/plans/{plan['id']}/versions",
+        headers=admin_headers,
+        json={
+            "weekly_frequency": 3,
+            "min_rest_days": 1,
+            "fatigue_threshold": 8,
+            "initial_reduced_weeks": 2,
+            "initial_set_count": 2,
+            "config_json": {"sequence": ["A", "B"]},
+            "days": [
+                {
+                    "day_code": code,
+                    "name": f"Day {code}",
+                    "sort_order": sort_order,
+                    "slots": [
+                        {
+                            "name": "Compound",
+                            "sort_order": 0,
+                            "selection_rule_json": {"choose": 1},
+                            "options": [
+                                {
+                                    "exercise_id": exercise.id,
+                                    "is_preferred": True,
+                                    "sort_order": 0,
+                                    "set_count": 3,
+                                    "reps_min": 8,
+                                    "reps_max": 12,
+                                }
+                            ],
+                        }
+                    ],
+                }
+                for sort_order, code in enumerate(("A", "B"))
+            ],
+        },
+    )
+    assert version_response.status_code == 201, version_response.text
+    draft = version_response.json()
+    publish_response = client.post(
+        f"/api/v1/admin/plan-versions/{draft['id']}/publish",
+        headers=admin_headers,
+        json={"expected_version": draft["version"]},
+    )
+    assert publish_response.status_code == 200, publish_response.text
+    published = publish_response.json()
+
+    # The assignee has already advanced beyond the old publication event.
+    before_assignment = client.get("/api/v1/sync/changes", headers=user_headers)
+    assert before_assignment.status_code == 200, before_assignment.text
+    cursor = before_assignment.json()["next_cursor"]
+    assert published["id"] not in {
+        change["entity_id"] for change in before_assignment.json()["changes"]
+    }
+
+    assignment_start = date.today()
+    assignment_response = client.post(
+        "/api/v1/admin/assignments",
+        headers=admin_headers,
+        json={
+            "user_id": normal_user.id,
+            "plan_version_id": published["id"],
+            "status": "active",
+            "starts_on": assignment_start.isoformat(),
+        },
+    )
+    assert assignment_response.status_code == 201, assignment_response.text
+    assignment = assignment_response.json()
+
+    changes_response = client.get(
+        "/api/v1/sync/changes", headers=user_headers, params={"cursor": cursor}
+    )
+    assert changes_response.status_code == 200, changes_response.text
+    changes = changes_response.json()["changes"]
+    relevant = [
+        change
+        for change in changes
+        if change["entity_id"] in {published["id"], assignment["id"]}
+    ]
+
+    assert [change["entity_type"] for change in relevant] == [
+        "plan_version",
+        "plan_assignment",
+    ]
+    plan_change = relevant[0]
+    assert plan_change["payload"]["id"] == published["id"]
+    assert plan_change["payload"]["status"] == "published"
+    assert plan_change["payload"]["owner_user_id"] == admin_user.id
+    assert plan_change["payload"]["days"][0]["slots"][0]["options"][0][
+        "exercise_id"
+    ] == exercise.id
+    assignment_change = relevant[1]
+    assignment_payload = assignment_change["payload"]
+    assert PlanAssignmentOut.model_validate(assignment_payload)
+    assert assignment_payload["id"] == assignment["id"]
+    assert assignment_payload["user_id"] == normal_user.id
+    assert assignment_payload["plan_version_id"] == published["id"]
+    assert assignment_payload["start_local_date"] == assignment_start.isoformat()
+    assert assignment_payload["end_local_date"] is None
+    assert assignment_payload["is_active"] is True
+    assert assignment_payload["status"] == "active"
+    assert "starts_on" not in assignment_payload
+    assert "ends_on" not in assignment_payload
+
+
+def test_new_active_assignment_emits_previous_update_before_plan_and_replacement(
+    client: TestClient,
+    db_session: Session,
+    normal_user: User,
+    user_headers: dict[str, str],
+    admin_headers: dict[str, str],
+) -> None:
+    seeded = seed_default_plan(db_session)
+    previous_start = date.today() - timedelta(days=14)
+    replacement_start = date.today()
+    previous_response = client.post(
+        "/api/v1/admin/assignments",
+        headers=admin_headers,
+        json={
+            "user_id": normal_user.id,
+            "plan_version_id": seeded["plan_version_id"],
+            "status": "active",
+            "starts_on": previous_start.isoformat(),
+        },
+    )
+    assert previous_response.status_code == 201, previous_response.text
+    previous = previous_response.json()
+    cursor_response = client.get("/api/v1/sync/changes", headers=user_headers)
+    assert cursor_response.status_code == 200, cursor_response.text
+
+    replacement_response = client.post(
+        "/api/v1/admin/assignments",
+        headers=admin_headers,
+        json={
+            "user_id": normal_user.id,
+            "plan_version_id": seeded["plan_version_id"],
+            "status": "active",
+            "starts_on": replacement_start.isoformat(),
+        },
+    )
+    assert replacement_response.status_code == 201, replacement_response.text
+    replacement = replacement_response.json()
+
+    changes_response = client.get(
+        "/api/v1/sync/changes",
+        headers=user_headers,
+        params={"cursor": cursor_response.json()["next_cursor"]},
+    )
+    assert changes_response.status_code == 200, changes_response.text
+    relevant = [
+        change
+        for change in changes_response.json()["changes"]
+        if change["entity_id"]
+        in {previous["id"], seeded["plan_version_id"], replacement["id"]}
+    ]
+
+    assert [change["entity_type"] for change in relevant] == [
+        "plan_assignment",
+        "plan_version",
+        "plan_assignment",
+    ]
+    assert [change["operation"] for change in relevant] == ["UPSERT"] * 3
+    previous_payload = relevant[0]["payload"]
+    assert PlanAssignmentOut.model_validate(previous_payload)
+    assert previous_payload["status"] == "completed"
+    assert previous_payload["is_active"] is False
+    assert previous_payload["end_local_date"] == (
+        replacement_start - timedelta(days=1)
+    ).isoformat()
+    assert previous_payload["version"] == previous["version"] + 1
+    replacement_payload = relevant[2]["payload"]
+    assert PlanAssignmentOut.model_validate(replacement_payload)
+    assert replacement_payload == replacement
+
+    stored_previous = db_session.get(PlanAssignment, previous["id"])
+    assert stored_previous is not None
+    assert stored_previous.status == "completed"
+    assert stored_previous.ends_on == replacement_start - timedelta(days=1)
+    assert stored_previous.version == previous["version"] + 1
 
 
 def test_workout_rejects_another_users_plan_assignment(
@@ -535,6 +734,42 @@ def test_stale_workout_patch_returns_server_copy_and_persists_audit(
     assert audit.metadata_json["reason"] == "version_conflict"
 
 
+def test_workout_patch_refreshes_locked_row_before_version_check(
+    client: TestClient,
+    db_session: Session,
+    user_headers: dict[str, str],
+    workout_payload_factory: Callable[..., dict[str, Any]],
+) -> None:
+    payload = workout_payload_factory()
+    created = client.post(
+        "/api/v1/workout-sessions",
+        json=payload,
+        headers=_request_headers(user_headers, "create-before-identity-map-stale-patch"),
+    )
+    assert created.status_code == 201, created.text
+    stale_version = created.json()["version"]
+    cached = db_session.get(WorkoutSession, payload["id"])
+    assert cached is not None and cached.version == stale_version
+
+    # Simulate another committed transaction without refreshing this Session's
+    # identity-map object. A locked read must populate the newer server row.
+    with db_session.get_bind().begin() as connection:
+        connection.execute(
+            WorkoutSession.__table__.update()
+            .where(WorkoutSession.id == payload["id"])
+            .values(version=stale_version + 1)
+        )
+
+    conflict = client.patch(
+        f"/api/v1/workout-sessions/{payload['id']}",
+        json={"notes": "must not overwrite", "expected_version": stale_version},
+        headers=_request_headers(user_headers, "identity-map-stale-patch"),
+    )
+
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["detail"]["server_copy"]["version"] == stale_version + 1
+
+
 def test_workout_delete_is_soft_and_idempotent(
     client: TestClient,
     db_session: Session,
@@ -725,3 +960,101 @@ def test_readiness_and_cardio_upserts_are_idempotent(
     assert cardio_first.json() == cardio_again.json()
     assert db_session.scalar(select(func.count(DailyReadiness.id))) == 1
     assert db_session.scalar(select(func.count(CardioSession.id))) == 1
+
+
+def test_readiness_and_cardio_stale_versions_are_rejected(
+    client: TestClient,
+    user_headers: dict[str, str],
+) -> None:
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    readiness = {
+        "id": str(uuid4()),
+        "local_date": date.today().isoformat(),
+        "fatigue_score": 7,
+    }
+    cardio = {
+        "id": str(uuid4()),
+        "source": "windows",
+        "local_date": date.today().isoformat(),
+        "activity": "cycling",
+        "duration_minutes": 20,
+        "started_at": now,
+        "completed_at": now,
+    }
+    assert client.post(
+        "/api/v1/readiness",
+        json=readiness,
+        headers=_request_headers(user_headers, "create-readiness-before-stale"),
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/cardio-sessions",
+        json=cardio,
+        headers=_request_headers(user_headers, "create-cardio-before-stale"),
+    ).status_code == 201
+
+    readiness_conflict = client.post(
+        "/api/v1/readiness",
+        json={**readiness, "fatigue_score": 4, "expected_version": 99},
+        headers=_request_headers(user_headers, "stale-readiness-update"),
+    )
+    cardio_conflict = client.post(
+        "/api/v1/cardio-sessions",
+        json={**cardio, "duration_minutes": 25, "expected_version": 99},
+        headers=_request_headers(user_headers, "stale-cardio-update"),
+    )
+
+    assert readiness_conflict.status_code == 409, readiness_conflict.text
+    assert readiness_conflict.json()["detail"]["code"] == "version_conflict"
+    assert cardio_conflict.status_code == 409, cardio_conflict.text
+    assert cardio_conflict.json()["detail"]["code"] == "version_conflict"
+
+
+def test_readiness_date_and_cardio_client_identity_cannot_be_changed(
+    client: TestClient,
+    user_headers: dict[str, str],
+) -> None:
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    readiness = {
+        "id": str(uuid4()),
+        "local_date": date.today().isoformat(),
+        "fatigue_score": 5,
+    }
+    cardio = {
+        "id": str(uuid4()),
+        "client_id": str(uuid4()),
+        "source": "windows",
+        "local_date": date.today().isoformat(),
+        "activity": "walking",
+        "duration_minutes": 20,
+        "started_at": now,
+        "completed_at": now,
+    }
+    assert client.post(
+        "/api/v1/readiness",
+        json=readiness,
+        headers=_request_headers(user_headers, "create-readiness-identity"),
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/cardio-sessions",
+        json=cardio,
+        headers=_request_headers(user_headers, "create-cardio-identity"),
+    ).status_code == 201
+
+    changed_readiness = client.post(
+        "/api/v1/readiness",
+        json={
+            **readiness,
+            "local_date": (date.today() - timedelta(days=1)).isoformat(),
+        },
+        headers=_request_headers(user_headers, "change-readiness-identity"),
+    )
+    changed_cardio = client.post(
+        "/api/v1/cardio-sessions",
+        json={**cardio, "client_id": str(uuid4())},
+        headers=_request_headers(user_headers, "change-cardio-identity"),
+    )
+
+    assert changed_readiness.status_code == 409, changed_readiness.text
+    assert changed_readiness.json()["detail"]["code"] == "readiness_date_immutable"
+    assert changed_cardio.status_code == 409, changed_cardio.text
+    assert changed_cardio.json()["detail"]["code"] == "cardio_client_id_immutable"

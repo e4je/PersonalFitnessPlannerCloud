@@ -12,7 +12,7 @@
 - 客户端 UUID、乐观锁、软删除、历史计划/动作/处方快照、重复训练组防护。
 - `Idempotency-Key` 首次响应回放；同键异载荷返回 409。
 - 增量同步游标、保留窗口、过旧游标 `full_resync_required`、Android/Windows 批次兼容。普通用户仅同步本人记录/分配、全局目录，以及系统、本人拥有或有效分配的已发布计划版本；逻辑计划和草稿仅管理员可见。
-- 结构化 JSON 日志、CORS 白名单、请求体大小限制、登录限速、无配置泄露的健康检查。
+- 结构化 JSON 日志、CORS 白名单、按实际 ASGI 字节执行的请求体大小限制、登录限速、无配置泄露的健康检查。
 - 完整 OpenAPI、首个迁移、默认 A/B 计划 seed、Docker Compose、测试与 smoke 脚本。
 
 ## 目录
@@ -43,7 +43,7 @@ docker compose ps
 python -m scripts.smoke_test
 ```
 
-启动顺序由容器入口自动执行：`alembic upgrade head` → 幂等 seed → Gunicorn/Uvicorn。MySQL 仅在 Compose 内部网络暴露 3306；后端默认只绑定宿主机 `127.0.0.1:8000`。管理员需在服务健康后按下文执行一次性创建命令。
+启动顺序由容器入口自动执行：`alembic upgrade head` → 幂等 seed → Gunicorn/Uvicorn。官方镜像默认使用一个 Gunicorn worker，使进程内登录限速在默认单容器部署中保持一致；多容器/多实例仍需共享限流。MySQL 仅在 Compose 内部网络暴露 3306；后端默认只绑定宿主机 `127.0.0.1:8000`。管理员需在服务健康后按下文执行一次性创建命令。
 
 ## 本地 Python 开发
 
@@ -125,9 +125,10 @@ Android 兼容约定：登录使用 JSON；所有写入使用 `Idempotency-Key`�
 - 业务对象 ID 为 UUID 字符串；数据库连接会固定为 UTC；另存 `local_date` 和用户 IANA 时区。
 - 动作、器械、计划由服务器权威管理。已发布计划及其日/位置/选项不可修改；修改必须创建新版本。
 - 新分配仅影响后续新训练；历史训练保留计划、动作和处方快照。
-- PATCH 可用 `expected_version`（DELETE 也支持 `If-Match`）；冲突返回 HTTP 409、`server_copy` 并写审计。
+- PATCH 可用 `expected_version`（DELETE 也支持 `If-Match`）；兼容期允许旧客户端省略。提供版本时，服务器会在数据库行锁内原子校验，冲突返回 HTTP 409、`server_copy` 并写审计；新版客户端应始终发送最近一次服务器副本的版本。省略版本的写入仍会被行锁串行化，但不具备拒绝旧副本覆盖的完整乐观并发语义。
 - 同步游标是服务端单调序列。游标早于保留窗口时返回 `full_resync_required=true`；该断档页不得应用或推进 cursor，客户端应重新调用 bootstrap。
 - bootstrap 返回本人全部未软删 workout/readiness/cardio、assignments、active catalog、当前/相关 assignment 计划版本、user/permissions/recommendation 和一致性 cursor。新版客户端以此替换服务器权威缓存并保护 pending Outbox。
+- 请求体上限按实际 ASGI 流累计字节，而不只依赖 `Content-Length`；chunked/HTTP 2 请求和未读取正文的端点同样会在超限时返回 413。生产网关仍应设置独立的外层限制。
 
 ## 测试与验收
 
@@ -135,6 +136,7 @@ Android 兼容约定：登录使用 JSON；所有写入使用 `Idempotency-Key`�
 
 ```bash
 pytest
+pip-audit --strict --require-hashes --disable-pip -r requirements.lock
 TEST_DATABASE_URL='mysql+pymysql://fitness:password@mysql:3306/fitness_test' pytest -m mysql
 alembic upgrade head
 python -m scripts.seed_default_plan
@@ -168,7 +170,7 @@ alembic current
 - 设置 `ENVIRONMENT=production`、强随机 `JWT_SECRET`、真实 CORS 白名单与 TLS 终止代理。
 - 不发布 MySQL 端口；数据库账号采用最小权限；密钥由 Secret Manager 注入，不写 `.env` 或镜像。
 - 先备份，再运行 Alembic；滚动发布前验证 `/health/ready` 与 OpenAPI 兼容性。
-- 在网关补充全局登录限速、WAF、请求大小和 TLS 策略；应用内限速是单进程防护。
+- 在网关补充全局登录限速、WAF、请求大小和 TLS 策略；默认容器虽为单 worker，应用内限速仍只是当前进程的防护。
 - 聚合 JSON 日志并为 `SYNC_CONFLICT`、refresh token 重放、管理发布操作配置告警。
 
 更完整的部署步骤见 `docs/DEPLOYMENT.md`。
@@ -176,9 +178,8 @@ alembic current
 ## 已知限制
 
 - full bootstrap 当前直接返回全部 active 个人历史且未分页；超长历史应演进为一致性快照分页，避免大响应体和内存峰值。
-- 部分统一错误响应、admin/recommendation OpenAPI schema 和原子乐观锁仍需继续收紧，并在真实 MySQL 并发测试验证。
-
-- 登录限速存于进程内；多 worker/多实例的全局限速需由 API 网关或 Redis 补充。
+- 部分统一错误响应和 admin/recommendation OpenAPI schema 仍需继续收紧；健康记录已用行锁串行化，但兼容期可省略 `expected_version`，真实 MySQL 并发行为仍需专项验证。
+- 登录限速存于进程内；官方镜像默认一个 worker，多容器/多实例的全局限速仍需由 API 网关或 Redis 补充。
 - 发布不可变由服务层和 SQLAlchemy flush 防护实现；绕过应用直接执行 SQL 的高权限账号仍可改库。
 - 当前没有公开注册、密码找回或邮件验证接口；用户生命周期应接入后续身份管理流程。
 - 增量 change feed 已按保留窗口判断失效，但历史清理需要由部署方配置周期任务。

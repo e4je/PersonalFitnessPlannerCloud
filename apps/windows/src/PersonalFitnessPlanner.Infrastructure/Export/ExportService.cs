@@ -8,11 +8,17 @@ namespace PersonalFitnessPlanner.Infrastructure.Export;
 
 public sealed class ExportService
 {
+    public const long MaxImportFileBytes = 64L * 1024 * 1024;
+    public const int MaxImportedPlans = 1_000;
+    public const int MaxImportedWorkoutSessions = 100_000;
+    public const int MaxImportedSets = 1_000_000;
+
     private static readonly UTF8Encoding Utf8WithBom = new(true);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        MaxDepth = 64
     };
 
     private readonly FitnessRepository _repository;
@@ -80,17 +86,54 @@ public sealed class ExportService
     public async Task ImportDataJsonAsync(string filePath, CancellationToken cancellationToken = default)
     {
         var fullPath = Path.GetFullPath(filePath);
+        var file = new FileInfo(fullPath);
+        if (!file.Exists) throw new FileNotFoundException("导入 JSON 文件不存在。", fullPath);
+        if (file.Length == 0) throw new InvalidDataException("导入 JSON 为空或格式不正确。");
+        if (file.Length > MaxImportFileBytes)
+        {
+            throw new InvalidDataException($"导入 JSON 不能超过 {MaxImportFileBytes / 1024 / 1024} MiB。");
+        }
+
         await using var stream = new FileStream(
             fullPath, FileMode.Open, FileAccess.Read, FileShare.Read,
             64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var export = await JsonSerializer.DeserializeAsync<HistoryExport>(stream, JsonOptions, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidDataException("导入 JSON 为空或格式不正确。");
+        if (stream.Length > MaxImportFileBytes)
+        {
+            throw new InvalidDataException($"导入 JSON 不能超过 {MaxImportFileBytes / 1024 / 1024} MiB。");
+        }
+
+        HistoryExport export;
+        try
+        {
+            export = await JsonSerializer.DeserializeAsync<HistoryExport>(stream, JsonOptions, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidDataException("导入 JSON 为空或格式不正确。");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("导入 JSON 格式不正确或嵌套过深。", exception);
+        }
+
         if (export.SchemaVersion != 1)
         {
             throw new InvalidDataException($"不支持的数据导出版本 {export.SchemaVersion}。");
         }
+        ValidateImportStructure(export);
+
+        // Server identity, storage paths and build version belong to this
+        // installation. An imported backup may restore only portable choices.
+        var current = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
+        var portableSettings = current with
+        {
+            TimeZone = export.Settings.TimeZone,
+            UnitSystem = export.Settings.UnitSystem,
+            TrainingDays = export.Settings.TrainingDays,
+            Theme = export.Settings.Theme,
+            AutomaticSync = export.Settings.AutomaticSync
+        };
+        SettingsStore.Validate(portableSettings);
+
         await _repository.ImportSnapshotAsync(export, cancellationToken).ConfigureAwait(false);
-        await _settings.SaveAsync(export.Settings, cancellationToken).ConfigureAwait(false);
+        await _settings.SaveAsync(portableSettings, cancellationToken).ConfigureAwait(false);
     }
 
     private static string PrepareTargetDirectory(string targetDirectory)
@@ -103,10 +146,55 @@ public sealed class ExportService
 
     private static string EscapeCsv(string value)
     {
+        var firstNonWhitespace = 0;
+        while (firstNonWhitespace < value.Length && char.IsWhiteSpace(value[firstNonWhitespace]))
+        {
+            firstNonWhitespace++;
+        }
+        if (firstNonWhitespace < value.Length && value[firstNonWhitespace] is '=' or '+' or '-' or '@')
+        {
+            value = "'" + value;
+        }
+
         if (value.ContainsAny([',', '"', '\r', '\n']))
         {
             return $"\"{value.Replace("\"", "\"\"")}\"";
         }
         return value;
     }
+
+    private static void ValidateImportStructure(HistoryExport export)
+    {
+        if (export.Plans is null || export.WorkoutSessions is null || export.Settings is null)
+        {
+            throw new InvalidDataException("导入 JSON 缺少 plans、workoutSessions 或 settings。");
+        }
+        if (export.Plans.Count > MaxImportedPlans || export.WorkoutSessions.Count > MaxImportedWorkoutSessions)
+        {
+            throw new InvalidDataException("导入 JSON 中的计划或训练记录数量超过安全上限。");
+        }
+        if (export.Plans.Any(plan => plan is null || !HasSafePlanShape(plan)))
+        {
+            throw new InvalidDataException("导入 JSON 中的训练计划结构无效或超过安全上限。");
+        }
+
+        long setCount = 0;
+        foreach (var session in export.WorkoutSessions)
+        {
+            if (session is null || session.PlanSnapshot is null || !HasSafePlanShape(session.PlanSnapshot) || session.Sets is null)
+            {
+                throw new InvalidDataException("导入 JSON 中的训练记录结构无效。");
+            }
+            setCount += session.Sets.Count;
+            if (setCount > MaxImportedSets)
+            {
+                throw new InvalidDataException("导入 JSON 中的训练组数超过安全上限。");
+            }
+        }
+    }
+
+    private static bool HasSafePlanShape(PlanData plan) =>
+        plan.Days is not null && plan.Days.Count <= 31 &&
+        plan.Days.All(day => day is not null && day.Items is not null && day.Items.Count <= 256 &&
+            day.Items.All(item => item is not null && item.Options is not null && item.Options.Count <= 32));
 }

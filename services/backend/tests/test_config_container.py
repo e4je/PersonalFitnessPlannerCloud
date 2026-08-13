@@ -99,6 +99,9 @@ def test_compose_injects_runtime_tuning_without_persistent_admin_secret() -> Non
     assert "scripts.create_admin" not in entrypoint
     assert "ADMIN_PASSWORD" not in entrypoint
 
+    dockerfile = (backend_root / "Dockerfile").read_text(encoding="utf-8")
+    assert '"--workers", "1"' in dockerfile
+
 
 @pytest.mark.parametrize(
     ("jwt_secret", "mysql_password"),

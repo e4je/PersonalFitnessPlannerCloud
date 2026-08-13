@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.cardio import serialize_cardio
@@ -70,6 +70,11 @@ def bootstrap(
             .where(
                 PlanAssignment.user_id == current_user.id,
                 PlanAssignment.deleted_at.is_(None),
+                PlanAssignment.status.in_(("scheduled", "active")),
+                or_(
+                    PlanAssignment.ends_on.is_(None),
+                    PlanAssignment.ends_on >= today,
+                ),
             )
             .order_by(PlanAssignment.starts_on.desc())
         )

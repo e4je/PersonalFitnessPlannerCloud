@@ -364,12 +364,22 @@ def serialize_workout(item: WorkoutSession, *, idempotency_key: str | None = Non
     )
 
 
-def _load_workout(db: Session, workout_id: str) -> WorkoutSession | None:
-    return db.scalar(
+def _load_workout(
+    db: Session,
+    workout_id: str,
+    *,
+    for_update: bool = False,
+) -> WorkoutSession | None:
+    query = (
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
         .where(WorkoutSession.id == workout_id)
     )
+    if for_update:
+        # ``populate_existing`` is essential after waiting on a row lock: a
+        # long-lived sync Session may already have an older identity-map copy.
+        query = query.with_for_update().execution_options(populate_existing=True)
+    return db.scalar(query)
 
 
 def _conflict(
@@ -417,16 +427,25 @@ def _upsert_set(
     set_id = str(incoming.id)
     exercise_id = str(incoming.exercise_id)
     equipment_id = _string_id(incoming.equipment_id)
-    existing = next(
-        (
-            row
-            for row in session.sets
-            if row.id == set_id or row.client_set_id == set_id
-        ),
-        None,
+    # Every mutation path first locks the parent session, then its set. Keeping
+    # that order avoids deadlocks between whole-workout and standalone-set
+    # operations while making a supplied expected_version check atomic.
+    existing = db.scalar(
+        select(WorkoutSet)
+        .where(
+            WorkoutSet.workout_session_id == session.id,
+            or_(WorkoutSet.id == set_id, WorkoutSet.client_set_id == set_id),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if existing is None:
-        global_match = db.get(WorkoutSet, set_id)
+        global_match = db.scalar(
+            select(WorkoutSet)
+            .where(WorkoutSet.id == set_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if global_match is not None and global_match.workout_session_id != session.id:
             owner_session = _load_workout(db, global_match.workout_session_id)
             _conflict(
@@ -519,7 +538,7 @@ def apply_workout_upsert(
     if payload_id is None:
         raise HTTPException(status_code=422, detail={"code": "id_required"})
     attempted = payload.model_dump(mode="json", exclude_unset=True)
-    session = _load_workout(db, payload_id)
+    session = _load_workout(db, payload_id, for_update=True)
     is_new = session is None
 
     if session is not None and session.user_id != user.id:
@@ -870,7 +889,7 @@ def delete_workout_session(
     if replay is not None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    item = _load_workout(db, workout_id)
+    item = _load_workout(db, workout_id, for_update=True)
     if item is None or item.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout session not found")
     if version is not None and version != item.version:

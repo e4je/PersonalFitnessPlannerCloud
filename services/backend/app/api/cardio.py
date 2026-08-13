@@ -100,23 +100,44 @@ def apply_cardio_upsert(
     payload: CardioSessionUpsert,
 ) -> CardioSessionOut:
     item_id = str(payload.id)
-    item = db.get(CardioSession, item_id)
-    if item is not None and item.user_id != user.id:
+    existing = db.get(
+        CardioSession,
+        item_id,
+        populate_existing=True,
+        with_for_update=True,
+    )
+    if existing is not None and existing.user_id != user.id:
         raise HTTPException(status_code=404, detail="Cardio session not found")
 
     client_id = str(payload.client_id or payload.id)
-    duplicate = db.scalar(
-        select(CardioSession).where(
-            CardioSession.user_id == user.id,
-            CardioSession.client_id == client_id,
-            CardioSession.id != item_id,
-        )
-    )
-    if duplicate is not None:
+    # client_id is the idempotent client identity. Existing rows cannot swap it;
+    # locking by this one canonical key prevents opposite lock-order deadlocks.
+    if existing is not None and existing.user_id == user.id and existing.client_id != client_id:
         _cardio_conflict(
             db,
             user_id=user.id,
-            item=duplicate,
+            item=existing,
+            payload=payload,
+            reason="cardio_client_id_immutable",
+        )
+    item = db.scalar(
+        select(CardioSession)
+        .where(
+            CardioSession.user_id == user.id,
+            CardioSession.client_id == client_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if item is None and existing is not None:
+        item = existing
+    if item is not None and item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Cardio session not found")
+    if item is not None and item.id != item_id:
+        _cardio_conflict(
+            db,
+            user_id=user.id,
+            item=item,
             payload=payload,
             reason="duplicate_client_uuid",
         )
@@ -152,7 +173,6 @@ def apply_cardio_upsert(
                 server_copy=serialize_cardio(item).model_dump(mode="json"),
                 attempted=payload.model_dump(mode="json"),
             )
-        item.client_id = client_id
         item.source_device = payload.source_device or payload.source or item.source_device
         item.client_version = payload.client_version
         item.local_date = payload.local_date

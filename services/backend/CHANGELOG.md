@@ -6,6 +6,9 @@
 - Tightened plan change visibility and workout assignment/tree authorization; removed reusable secrets and bound runtime versions to the vendored contract.
 - Added idempotent ordinary-user provisioning with a default canonical assignment.
 - Added complete active workout/readiness/cardio bootstrap recovery, typed bootstrap schemas, shared recommendation/progression vectors, and retention-gap client semantics.
+- Enforced streamed request-size limits, database-current private-plan authorization, assignment-time plan snapshot replay, and row-locked optimistic-version checks for mutable health entities.
+- Kept `expected_version` optional during client compatibility while documenting the weaker stale-copy protection when omitted; changed the default image to one Gunicorn worker so process-local login limiting is consistent in the standard single-container deployment.
+- Added locked Python dependency auditing in CI and weekly Dependabot checks; real MySQL concurrency and cross-client E2E remain release-gate work.
 
 ## 0.1.0 - 2026-08-09
 

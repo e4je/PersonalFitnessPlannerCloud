@@ -68,6 +68,7 @@ def get_sync_changes(
         cursor=cursor,
         limit=limit,
         include_unpublished_plans="admin" in role_names(db, current_user),
+        user_timezone=current_user.timezone,
     )
 
 
@@ -81,20 +82,41 @@ def _delete_entity(
 ) -> tuple[dict[str, Any], int | None]:
     expected_version = payload.get("expected_version")
     if entity_type == "workout_session":
-        item = _load_workout(db, entity_id)
+        item = _load_workout(db, entity_id, for_update=True)
         serializer = serialize_workout
     elif entity_type == "daily_readiness":
-        item = db.get(DailyReadiness, entity_id)
+        item = db.get(
+            DailyReadiness,
+            entity_id,
+            populate_existing=True,
+            with_for_update=True,
+        )
         serializer = serialize_readiness
     elif entity_type == "cardio_session":
-        item = db.get(CardioSession, entity_id)
+        item = db.get(
+            CardioSession,
+            entity_id,
+            populate_existing=True,
+            with_for_update=True,
+        )
         serializer = serialize_cardio
     elif entity_type == "workout_set":
+        # Discover the parent without mutating, then follow the same lock order
+        # as whole-workout writes: parent session first, child set second.
         item = db.get(WorkoutSet, entity_id)
         if item is None:
             return {"id": entity_id, "deleted_at": payload.get("deleted_at")}, None
-        if item.session.user_id != user.id:
+        session = _load_workout(db, item.workout_session_id, for_update=True)
+        if session is None or session.user_id != user.id:
             raise HTTPException(status_code=404, detail="Entity not found")
+        item = db.get(
+            WorkoutSet,
+            entity_id,
+            populate_existing=True,
+            with_for_update=True,
+        )
+        if item is None:
+            return {"id": entity_id, "deleted_at": payload.get("deleted_at")}, None
         server_copy = serialize_workout_set(item).model_dump(mode="json")
         if expected_version is not None and int(expected_version) != item.version:
             version_conflict(
@@ -109,7 +131,7 @@ def _delete_entity(
         if item.deleted_at is None:
             item.deleted_at = utcnow()
             item.version += 1
-            item.session.version += 1
+            session.version += 1
             db.flush()
             server_copy = serialize_workout_set(item).model_dump(mode="json")
             record_sync_change(
@@ -121,12 +143,12 @@ def _delete_entity(
                 payload=server_copy,
                 actor_user_id=user.id,
             )
-            parent_copy = serialize_workout(item.session).model_dump(mode="json")
+            parent_copy = serialize_workout(session).model_dump(mode="json")
             record_sync_change(
                 db,
                 entity_type="workout_session",
-                entity_id=item.session.id,
-                entity_version=item.session.version,
+                entity_id=session.id,
+                entity_version=session.version,
                 operation="UPSERT",
                 payload=parent_copy,
                 actor_user_id=user.id,
@@ -220,7 +242,7 @@ def _upsert_standalone_workout_set(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "session_id_required"},
         )
-    session = _load_workout(db, str(session_id))
+    session = _load_workout(db, str(session_id), for_update=True)
     if session is None or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Workout session not found")
 

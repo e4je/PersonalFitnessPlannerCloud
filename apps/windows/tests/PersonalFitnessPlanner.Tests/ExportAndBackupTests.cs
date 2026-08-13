@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -80,6 +81,140 @@ public sealed class ExportAndBackupTests
         Assert.Equal(40m, restored.Sets[0].WeightKg);
     }
 
+    [Theory]
+    [InlineData("=2+3")]
+    [InlineData("  +2+3")]
+    [InlineData("\t-2+3")]
+    [InlineData(" @SUM(1,2)")]
+    public async Task CsvExport_NeutralizesFormulaPrefixesAfterWhitespace(string exerciseName)
+    {
+        using var temporary = new TemporaryDirectory("CSV 公式注入");
+        var paths = new AppPaths(temporary.Path);
+        var repository = new FitnessRepository(new SqliteDatabase(paths));
+        await repository.InitializeAsync();
+        var draft = await repository.CreatePlanDraftAsync();
+        var firstDay = draft.Days.First();
+        var firstItem = firstDay.Items.OrderBy(item => item.Position).First();
+        var preferred = firstItem.Options.Single(option => option.IsPreferred) with { ExerciseName = exerciseName };
+        var changedItem = firstItem with
+        {
+            Options = firstItem.Options.Select(option => option.Id == preferred.Id ? preferred : option).ToArray()
+        };
+        var changedDay = firstDay with
+        {
+            Items = firstDay.Items.Select(item => item.Id == changedItem.Id ? changedItem : item).ToArray()
+        };
+        draft = draft with
+        {
+            Days = draft.Days.Select(day => day.Code == changedDay.Code ? changedDay : day).ToArray()
+        };
+        await repository.SavePlanDraftAsync(draft);
+        var published = await repository.PublishPlanAsync(draft);
+        await repository.AssignPlanAsync(published.Id);
+        var workout = await repository.StartWorkoutAsync(changedDay.Code, new DateOnly(2026, 8, 13));
+        await repository.SaveSetAsync(new SaveSetInput(
+            workout.SessionId,
+            changedItem.Id,
+            preferred,
+            1,
+            10,
+            10,
+            null,
+            2,
+            false,
+            string.Empty,
+            $"csv:{Guid.NewGuid():D}"));
+        await repository.CompleteWorkoutAsync(workout.SessionId, endedEarly: false);
+
+        var exporter = new ExportService(repository, new SettingsStore(paths));
+        var csvPath = await exporter.ExportHistoryCsvAsync(Path.Combine(temporary.Path, "exports"));
+        var csv = await File.ReadAllTextAsync(csvPath, Encoding.UTF8);
+
+        Assert.Contains("'" + exerciseName, csv);
+    }
+
+    [Fact]
+    public async Task JsonImport_PreservesMachineSettingsAndCredentialOriginAcrossRestart()
+    {
+        using var temporary = new TemporaryDirectory("恶意导入重启链");
+        var paths = new AppPaths(temporary.Path);
+        var originalSettings = AppSettingsData.Default(paths.DataDirectory) with
+        {
+            ApiBaseUrl = "https://fitness.example.com/api/",
+            Theme = "dark"
+        };
+        await new SettingsStore(paths).SaveAsync(originalSettings);
+        var accessToken = CreateJwt(new
+        {
+            sub = "import-user",
+            role = "user",
+            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
+        });
+        var loginHandler = new ImportRecordingHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/auth/login", StringComparison.Ordinal)
+                ? JsonResponse(HttpStatusCode.OK, JsonSerializer.Serialize(new
+                {
+                    access_token = accessToken,
+                    refresh_token = "refresh-import",
+                    expires_in = 3600
+                }))
+                : JsonResponse(HttpStatusCode.OK, "{\"changes\":[],\"next_cursor\":\"\"}"));
+
+        string exportPath;
+        using (var service = new AppDataService(paths, new HttpClient(loginHandler)))
+        {
+            await service.InitializeAsync();
+            await service.LoginAsync("import@example.com", "password");
+            exportPath = await service.ExportDataJsonAsync(Path.Combine(temporary.Path, "exports"));
+            var json = await File.ReadAllTextAsync(exportPath);
+            json = json.Replace(
+                    "https://fitness.example.com/api/",
+                    "https://attacker.example.net/",
+                    StringComparison.Ordinal)
+                .Replace(paths.DataDirectory.Replace("\\", "\\\\", StringComparison.Ordinal),
+                    "C:\\\\attacker-controlled", StringComparison.Ordinal);
+            await File.WriteAllTextAsync(exportPath, json, Encoding.UTF8);
+            await service.ImportDataJsonAsync(exportPath);
+
+            var settings = await service.GetSettingsAsync();
+            Assert.Equal(originalSettings.ApiBaseUrl, settings.ApiBaseUrl);
+            Assert.Equal(originalSettings.DataDirectory, settings.DataDirectory);
+            Assert.NotNull(await service.Tokens.LoadAsync());
+        }
+
+        var restartHandler = new ImportRecordingHandler(_ =>
+            JsonResponse(HttpStatusCode.OK, "{\"changes\":[],\"next_cursor\":\"restart-cursor\"}"));
+        using (var restarted = new AppDataService(paths, new HttpClient(restartHandler)))
+        {
+            await restarted.InitializeAsync();
+            var page = await restarted.ApiClient.GetChangesAsync(string.Empty);
+
+            Assert.Equal("restart-cursor", page.Cursor);
+            var request = Assert.Single(restartHandler.Requests);
+            Assert.Equal("fitness.example.com", request.RequestUri!.Host);
+            Assert.Equal("Bearer " + accessToken, request.Headers.Authorization?.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task JsonImport_RejectsOversizedFileBeforeDeserialization()
+    {
+        using var temporary = new TemporaryDirectory("过大 JSON 导入");
+        var paths = new AppPaths(temporary.Path);
+        var repository = new FitnessRepository(new SqliteDatabase(paths));
+        await repository.InitializeAsync();
+        var filePath = Path.Combine(temporary.Path, "oversized.json");
+        await using (var stream = new FileStream(filePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            stream.SetLength(ExportService.MaxImportFileBytes + 1);
+        }
+
+        var importer = new ExportService(repository, new SettingsStore(paths));
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => importer.ImportDataJsonAsync(filePath));
+
+        Assert.Contains("64 MiB", exception.Message);
+    }
+
     [Fact]
     public async Task Backup_UsesConsistentSqliteCopy_AndRetainsNewestTen()
     {
@@ -104,5 +239,34 @@ public sealed class ExportAndBackupTests
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA integrity_check;";
         Assert.Equal("ok", await command.ExecuteScalarAsync());
+    }
+
+    private static string CreateJwt(object payload) =>
+        Base64Url(JsonSerializer.SerializeToUtf8Bytes(new { alg = "none", typ = "JWT" })) + "." +
+        Base64Url(JsonSerializer.SerializeToUtf8Bytes(payload)) + ".signature";
+
+    private static string Base64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    private static HttpResponseMessage JsonResponse(HttpStatusCode status, string json) => new(status)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json")
+    };
+
+    private sealed class ImportRecordingHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _response;
+
+        public ImportRecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> response) => _response = response;
+
+        public List<HttpRequestMessage> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(_response(request));
+        }
     }
 }

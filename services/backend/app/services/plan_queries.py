@@ -28,6 +28,45 @@ def get_plan_version(db: Session, plan_version_id: str) -> PlanVersion | None:
     )
 
 
+def can_access_plan_version(
+    db: Session,
+    plan_version: PlanVersion,
+    *,
+    user_id: str,
+    is_admin: bool,
+    local_date: date,
+) -> bool:
+    """Return whether the current principal may read one complete plan version.
+
+    Administrators may inspect drafts, but their role must be resolved by the
+    API from current, non-deleted database links. Standard users may only read
+    published versions that are system-owned, owned by them, or referenced by
+    one of their still-valid assignments.
+    """
+
+    plan = plan_version.plan
+    if plan is None or plan.deleted_at is not None:
+        return False
+    if is_admin:
+        return True
+    if plan_version.status != "published":
+        return False
+    if plan.is_system or plan.owner_user_id == user_id:
+        return True
+    assignment_id = db.scalar(
+        select(PlanAssignment.id)
+        .where(
+            PlanAssignment.user_id == user_id,
+            PlanAssignment.plan_version_id == plan_version.id,
+            PlanAssignment.deleted_at.is_(None),
+            PlanAssignment.status.in_(("scheduled", "active")),
+            (PlanAssignment.ends_on.is_(None) | (PlanAssignment.ends_on >= local_date)),
+        )
+        .limit(1)
+    )
+    return assignment_id is not None
+
+
 def get_current_assignment(
     db: Session, user_id: str, local_date: date
 ) -> PlanAssignment | None:

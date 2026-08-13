@@ -8,6 +8,23 @@ public sealed class SqliteDatabaseTests
     private const int LatestSchemaVersion = 8;
 
     [Fact]
+    public async Task BundledSqliteVersion_IncludesSecurityFixes()
+    {
+        using var temporary = new TemporaryDirectory("SQLite native version");
+        var database = new SqliteDatabase(new AppPaths(temporary.Path));
+        await database.InitializeAsync();
+
+        await using var connection = await database.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT sqlite_version();";
+
+        var versionText = Assert.IsType<string>(await command.ExecuteScalarAsync());
+        Assert.True(
+            Version.TryParse(versionText, out var version) && version >= new Version(3, 50, 2),
+            $"Bundled SQLite {versionText} is older than the security baseline 3.50.2.");
+    }
+
+    [Fact]
     public async Task InitializeAsync_MigratesIdempotently_InChinesePathWithSpaces()
     {
         using var temporary = new TemporaryDirectory("健身 数据库 migration");

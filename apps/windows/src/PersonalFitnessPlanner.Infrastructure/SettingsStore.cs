@@ -1,5 +1,6 @@
 using System.Text.Json;
 using PersonalFitnessPlanner.Infrastructure.Models;
+using PersonalFitnessPlanner.Infrastructure.Network;
 
 namespace PersonalFitnessPlanner.Infrastructure;
 
@@ -62,13 +63,14 @@ public sealed class SettingsStore
         }
     }
 
-    private static void Validate(AppSettingsData settings)
+    internal static void Validate(AppSettingsData settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (!Uri.TryCreate(settings.ApiBaseUrl, UriKind.Absolute, out var apiUri) ||
-            apiUri.Scheme is not ("http" or "https"))
+        if (!FitnessApiClient.TryValidateBaseAddress(settings.ApiBaseUrl, out var apiUri))
         {
-            throw new ArgumentException("API 地址必须是有效的 HTTP(S) 绝对地址。", nameof(settings));
+            throw new ArgumentException(
+                "API 地址必须是无账号、查询参数和片段的有效 HTTP(S) 绝对地址。",
+                nameof(settings));
         }
         if (apiUri.Scheme == "http" && !apiUri.IsLoopback &&
             !string.Equals(apiUri.Host, "localhost", StringComparison.OrdinalIgnoreCase))

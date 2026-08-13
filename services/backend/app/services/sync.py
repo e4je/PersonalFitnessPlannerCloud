@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -192,6 +193,7 @@ def _visible_change_predicate(
     user_id: str,
     *,
     include_unpublished_plans: bool = False,
+    user_timezone: str = "UTC",
 ) -> Any:
     # Plan assignments are targeted server-authoritative records.  Their
     # ``actor_user_id`` is the administrator who made the assignment, not the
@@ -207,6 +209,10 @@ def _visible_change_predicate(
         SyncChange.actor_user_id == user_id,
     )
     catalog_change = SyncChange.entity_type.in_(GLOBAL_CATALOG_ENTITY_TYPES)
+    try:
+        local_date = datetime.now(ZoneInfo(user_timezone)).date()
+    except ZoneInfoNotFoundError:
+        local_date = datetime.now(ZoneInfo("UTC")).date()
     published_plan = and_(
         SyncChange.entity_type == "plan_version",
         SyncChange.payload_json["status"].as_string() == "published",
@@ -218,7 +224,11 @@ def _visible_change_predicate(
                 PlanAssignment.user_id == user_id,
                 PlanAssignment.plan_version_id == SyncChange.entity_id,
                 PlanAssignment.deleted_at.is_(None),
-                PlanAssignment.status.in_(("scheduled", "active", "completed")),
+                PlanAssignment.status.in_(("scheduled", "active")),
+                or_(
+                    PlanAssignment.ends_on.is_(None),
+                    PlanAssignment.ends_on >= local_date,
+                ),
             )
             .exists(),
         ),
@@ -247,11 +257,13 @@ def get_incremental_changes(
     cursor: str | None,
     limit: int,
     include_unpublished_plans: bool = False,
+    user_timezone: str = "UTC",
 ) -> SyncChangesOut:
     sequence = decode_sync_cursor(cursor)
     visible = _visible_change_predicate(
         user_id,
         include_unpublished_plans=include_unpublished_plans,
+        user_timezone=user_timezone,
     )
     cutoff = utcnow() - timedelta(days=settings.sync_retention_days)
     earliest_retained = db.scalar(

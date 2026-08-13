@@ -7,6 +7,7 @@
 - Hardened API-origin changes, refresh/logout token handling, and retention-gap recovery while protecting pending Outbox mutations.
 - Added stable local fallback assignment behavior for a server current plan without an explicit assignment.
 - Added transient-token bootstrap preflight and fail-closed account/local-mode switching so one account cannot inherit another account's Room cache, cursor, Outbox, or in-memory UI.
+- Neutralized spreadsheet formulas in user-controlled CSV cells while preserving RFC-style quoting for commas, quotes, and line breaks.
 
 ## 1.0.0 - 2026-08-09
 
