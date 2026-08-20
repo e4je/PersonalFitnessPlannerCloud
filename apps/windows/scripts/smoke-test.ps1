@@ -49,7 +49,7 @@ $process = Start-Process `
     -WindowStyle Hidden `
     -PassThru
 
-$timeoutMilliseconds = [checked]($TimeoutSeconds * 1000)
+$timeoutMilliseconds = [int]($TimeoutSeconds * 1000)
 if (-not $process.WaitForExit($timeoutMilliseconds)) {
     try {
         $process.Kill($true)
