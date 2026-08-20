@@ -2,7 +2,9 @@
 [CmdletBinding()]
 param(
     [string]$ExecutablePath,
-    [string]$DataDirectory
+    [string]$DataDirectory,
+    [ValidateRange(1, 600)]
+    [int]$TimeoutSeconds = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,7 +49,8 @@ $process = Start-Process `
     -WindowStyle Hidden `
     -PassThru
 
-if (-not $process.WaitForExit(30000)) {
+$timeoutMilliseconds = [int]($TimeoutSeconds * 1000)
+if (-not $process.WaitForExit($timeoutMilliseconds)) {
     try {
         $process.Kill($true)
     }
@@ -56,7 +59,7 @@ if (-not $process.WaitForExit(30000)) {
         $process.Kill()
     }
     $process.WaitForExit()
-    throw "EXE 烟雾测试在 30 秒内未退出，已终止进程树；测试数据保留在 $DataDirectory。"
+    throw "EXE 烟雾测试在 $TimeoutSeconds 秒内未退出，已终止进程树；测试数据保留在 $DataDirectory。"
 }
 
 $process.Refresh()

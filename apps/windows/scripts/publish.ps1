@@ -2,7 +2,9 @@
 [CmdletBinding()]
 param(
     [switch]$SkipTests,
-    [switch]$SkipSmokeTest
+    [switch]$SkipSmokeTest,
+    [ValidateRange(1, 600)]
+    [int]$SmokeTimeoutSeconds = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,7 +84,9 @@ if (-not (Test-Path -LiteralPath $deliveryExe -PathType Leaf)) {
 }
 
 if (-not $SkipSmokeTest) {
-    & (Join-Path $PSScriptRoot "smoke-test.ps1") -ExecutablePath $deliveryExe
+    & (Join-Path $PSScriptRoot "smoke-test.ps1") `
+        -ExecutablePath $deliveryExe `
+        -TimeoutSeconds $SmokeTimeoutSeconds
 }
 
 $file = Get-Item -LiteralPath $deliveryExe
