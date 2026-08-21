@@ -1,0 +1,30 @@
+name: Codex temporary backend lock generation
+
+on:
+  push:
+    branches:
+      - chore/backend-gunicorn-25
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install pip-tools
+        run: python -m pip install "pip-tools>=7.5,<8"
+      - name: Compile production lock
+        working-directory: services/backend
+        run: >-
+          pip-compile --generate-hashes --upgrade-package gunicorn
+          --output-file=requirements.lock --strip-extras pyproject.toml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: codex-gunicorn-lock
+          path: services/backend/requirements.lock
