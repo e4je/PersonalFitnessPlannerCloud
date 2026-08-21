@@ -1,6 +1,6 @@
 # 统一构建与发布
 
-> 本页是后续统一构建操作手册，不代表这些命令已在本轮全部执行。当前 `artifacts/` 只有占位文件，没有新的 APK、EXE 或镜像。
+> 本页同时说明本地统一打包和 GitHub tag 发布。仓库内的 `artifacts/` 仍是本地构建目录；GitHub Release 资产由独立 workflow 生成，不提交回源码。
 
 ## 前置条件
 
@@ -25,6 +25,20 @@ Android test/lint/assemble 应按独立 Gradle 调用顺序执行；不要把 Li
 Windows 发布会产生 self-contained single-file EXE 和 multi-file fallback，并运行非管理员/中文空格路径 smoke（除非显式跳过）。Release EXE 当前没有组织代码签名，外部分发前必须签名并扫描。
 
 Android Release APK 是 unsigned；必须用项目方私有上传密钥在受控 CI/签名环境签名。密钥不得进入仓库或构建日志。
+
+## GitHub tag 发布
+
+推送 `0.0.2`、`v0.0.2` 这类语义版本 tag 会触发 `.github/workflows/release.yml`。workflow 在 tag 指向的准确提交上重新执行 Android 与 Windows 测试，随后发布：
+
+```text
+PersonalFitnessPlanner-<tag>-android-debug.apk
+PersonalFitnessPlanner-<tag>-windows-x64.exe
+SHA256SUMS.txt
+```
+
+已有 tag 可从 GitHub Actions 的 `release` workflow 使用 `Run workflow`，输入 tag 后补发或覆盖同名资产。Release job 只在两个平台构建都成功后获得 `contents: write` 权限。
+
+自动发布的是可安装 Debug APK，application ID 为 `com.personalfitnessplanner.debug`。GitHub Runner 生成的调试签名不保证跨构建稳定；后续 APK 若无法覆盖安装，需要先同步/备份个人数据，再卸载旧 Debug APK。需要稳定原地升级时，应配置受保护的固定签名密钥并改为签名 Release APK。
 
 ## 产物
 

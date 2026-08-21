@@ -95,6 +95,16 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 
 `build-all.ps1` 会构建 Android、Windows 和后端镜像，并将可用文件与 SHA-256 清单汇总到本地 `artifacts/`。完整前置条件和参数见[构建说明](docs/build-and-release.md)。
 
+### GitHub Release
+
+推送语义版本 tag（例如 `0.0.2` 或 `v0.0.2`）会运行独立的 Release workflow。检查全部通过后，对应 GitHub Release 会包含：
+
+- 可安装的 Android Debug APK；
+- Windows x64 自包含单文件 EXE；
+- `SHA256SUMS.txt` 校验清单。
+
+已有 tag 可在 GitHub Actions 的 `release` workflow 中手动输入 tag 重新发布。Debug APK 使用 CI 临时调试签名，后续构建的证书可能不同；Android 若拒绝覆盖安装，需要先卸载旧 Debug APK。个人数据应先完成云端同步或备份。
+
 ### Android
 
 需要 JDK 17 或 21、Android SDK Platform 35 和 Build Tools 35.0.0。
