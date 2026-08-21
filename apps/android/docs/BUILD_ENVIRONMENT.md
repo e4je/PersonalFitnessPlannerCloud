@@ -2,6 +2,10 @@
 
 > Historical environment record for the pre-integration Android handoff. Paths and successful build claims below are not evidence for the current unified checkout; use `PersonalFitnessPlannerCloud/apps/android` and the root build guide for the next run.
 
+The current unified baseline uses Android Gradle Plugin 8.9.1, Kotlin 2.4.10,
+Gradle 8.11.1, and compile SDK 36. The historical values below describe the
+older pre-migration audit only.
+
 Audit date: 2026-08-09 (Asia/Shanghai)
 
 Initial state:
@@ -38,4 +42,4 @@ Set-Location '<workspace>\PersonalFitnessPlannerCloud\apps\android'
 .\gradlew.bat test
 ```
 
-The standard SDK, Gradle distribution/cache, and generated `local.properties` are machine-local prerequisites and are excluded from source control. The checked-in Wrapper pins Gradle 8.10.2 and its SHA-256; the source tree does not depend on a globally installed `gradle` executable.
+The standard SDK, Gradle distribution/cache, and generated `local.properties` are machine-local prerequisites and are excluded from source control. The checked-in Wrapper now pins Gradle 8.11.1 and its SHA-256; the source tree does not depend on a globally installed `gradle` executable.

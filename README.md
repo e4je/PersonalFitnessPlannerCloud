@@ -107,7 +107,7 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 
 ### Android
 
-需要 JDK 17 或 21、Android SDK Platform 35 和 Build Tools 35.0.0。
+需要 JDK 17 或 21、Android SDK Platform 36 和匹配的 Build Tools 36.x。
 
 ```powershell
 cd apps\android
