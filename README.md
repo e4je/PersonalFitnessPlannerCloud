@@ -23,7 +23,7 @@
 ```text
 PersonalFitnessPlannerCloud/
 ├─ apps/android/       Android 客户端（Kotlin、Jetpack Compose、Room）
-├─ apps/windows/       Windows 客户端（.NET 8、WPF、SQLite）
+├─ apps/windows/       Windows 客户端（.NET 10、WPF、SQLite）
 ├─ services/backend/   云同步服务（FastAPI、SQLAlchemy、Alembic、MySQL 8）
 ├─ contracts/          OpenAPI、默认计划和跨端规则测试数据
 ├─ infra/              Docker Compose 与 MySQL 配置
@@ -118,7 +118,7 @@ cd apps\android
 
 ### Windows
 
-需要 Windows 10/11 x64 和 .NET 8 SDK。
+需要 Windows 10/11 x64 和 .NET 10 SDK。
 
 ```powershell
 dotnet restore apps\windows\PersonalFitnessPlanner.sln

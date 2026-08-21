@@ -35,7 +35,7 @@ if ($GenerateClients) {
         --additional-properties packageName=com.personalfitnessplanner.generated,useCoroutines=true
     if ($LASTEXITCODE -ne 0) { throw "Android client generation failed" }
     & $generator.Source generate -i $spec -g csharp -o (Join-Path $repoRoot "contracts/generated/windows") `
-        --additional-properties packageName=PersonalFitnessPlanner.Generated,targetFramework=net8.0
+        --additional-properties packageName=PersonalFitnessPlanner.Generated,targetFramework=net10.0
     if ($LASTEXITCODE -ne 0) { throw "Windows client generation failed" }
 }
 

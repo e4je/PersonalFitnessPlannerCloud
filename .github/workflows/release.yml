@@ -120,7 +120,7 @@ jobs:
         run: git checkout --detach "$RELEASE_COMMIT"
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
       - name: Restore
         run: dotnet restore apps/windows/PersonalFitnessPlanner.sln
       - name: Audit NuGet dependencies

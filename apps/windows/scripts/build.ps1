@@ -19,7 +19,7 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
 
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
 if ($null -eq $dotnet) {
-    throw "未找到 dotnet。请安装 .NET 8 SDK（x64）后重试。"
+    throw "未找到 dotnet。请安装 .NET 10 SDK（x64）后重试。"
 }
 
 $sdkVersions = @(dotnet --list-sdks | ForEach-Object {
@@ -27,8 +27,8 @@ $sdkVersions = @(dotnet --list-sdks | ForEach-Object {
         [version]"$($Matches.major).$($Matches.minor).$($Matches.patch)"
     }
 })
-if (-not ($sdkVersions | Where-Object { $_.Major -ge 8 })) {
-    throw "未找到可用的 .NET 8 或更高版本 SDK。"
+if (-not ($sdkVersions | Where-Object { $_.Major -ge 10 })) {
+    throw "未找到可用的 .NET 10 或更高版本 SDK。"
 }
 
 New-Item -ItemType Directory -Force -Path $packageCache | Out-Null

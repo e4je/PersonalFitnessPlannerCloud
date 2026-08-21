@@ -11,7 +11,7 @@
 优先：
 
 - C#
-- .NET 8
+- .NET 10
 - WPF
 - MVVM
 - CommunityToolkit.Mvvm

@@ -1,12 +1,12 @@
 # Personal Fitness Planner（Windows）
 
-面向 Windows 10/11 x64 的个人健身计划桌面客户端。应用采用 .NET 8、WPF、MVVM 与 SQLite，支持 A/B 训练建议、按动作/器械隔离的重量建议、离线记录、历史快照、计划版本、增量同步和保留本地草稿的完整重新同步；后续发布脚本会生成无需预装 .NET Runtime、无需管理员权限的自包含 EXE，本轮源码整合没有生成新 EXE。
+面向 Windows 10/11 x64 的个人健身计划桌面客户端。应用采用 .NET 10、WPF、MVVM 与 SQLite，支持 A/B 训练建议、按动作/器械隔离的重量建议、离线记录、历史快照、计划版本、增量同步和保留本地草稿的完整重新同步；后续发布脚本会生成无需预装 .NET Runtime、无需管理员权限的自包含 EXE，本轮源码整合没有生成新 EXE。
 
 ## 环境要求
 
 - Windows 10/11 x64。
 - Windows PowerShell 5.1 或 PowerShell 7。
-- 源码构建需要 .NET 8 SDK 或满足 `global.json` 前滚规则的更高版本 SDK。
+- 源码构建需要 .NET 10 SDK 或满足 `global.json` 前滚规则的更高版本 SDK。
 - NuGet 依赖还原只访问项目 `NuGet.Config` 中声明的源；包固定缓存到仓库内 `.packages/`。
 - 构建后运行 `artifacts/PersonalFitnessPlanner.exe` 不需要安装 .NET；当前统一副本尚无该文件。
 
