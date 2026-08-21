@@ -2,7 +2,7 @@
 
 > Historical environment record for the pre-integration Android handoff. Paths and successful build claims below are not evidence for the current unified checkout; use `PersonalFitnessPlannerCloud/apps/android` and the root build guide for the next run.
 
-The current unified baseline uses Android Gradle Plugin 8.9.1, Kotlin 2.4.10,
+The current unified baseline uses Android Gradle Plugin 8.10.1, Kotlin 2.4.10,
 Gradle 8.11.1, and compile SDK 36. The historical values below describe the
 older pre-migration audit only.
 

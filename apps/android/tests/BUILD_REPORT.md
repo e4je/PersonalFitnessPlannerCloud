@@ -2,7 +2,7 @@
 
 > 历史归档：本报告记录整合前 `01_Android_APK/android` 的原始交付，不是当前统一副本的构建结果。统一副本没有保留这里引用的 `app/build` 报告或 APK，当前状态以根 `docs/test-report.md` 为准。
 
-当前统一副本的构建基线已迁移到 AGP 8.9.1、Kotlin 2.4.10、Gradle 8.11.1 和 compile SDK 36；下方旧版本信息仅用于保留历史审计记录。
+当前统一副本的构建基线已迁移到 AGP 8.10.1、Kotlin 2.4.10、Gradle 8.11.1 和 compile SDK 36；下方旧版本信息仅用于保留历史审计记录。
 
 验收日期：2026-08-09（Asia/Shanghai）
 
