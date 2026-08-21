@@ -28,6 +28,7 @@ from app.services.auth import (
     TokenBundle,
     authenticate_user,
     issue_token_pair,
+    login_ip_rate_key,
     login_rate_key,
     login_rate_limiter,
     revoke_for_logout,
@@ -72,24 +73,29 @@ def login(
     db: Annotated[Session, Depends(get_db)],
 ) -> TokenResponse:
     client_ip = _client_ip(request)
-    rate_key = login_rate_key(client_ip, str(payload.email))
-    allowed, retry_after = login_rate_limiter.allowed(rate_key)
-    if not allowed:
+    account_rate_key = login_rate_key(client_ip, str(payload.email))
+    ip_rate_key = login_ip_rate_key(client_ip)
+    account_allowed, account_retry_after = login_rate_limiter.allowed(account_rate_key)
+    ip_allowed, ip_retry_after = login_rate_limiter.allowed(ip_rate_key)
+    if not account_allowed or not ip_allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
                 "code": "login_rate_limited",
                 "message": "Too many failed login attempts; try again later",
             },
-            headers={"Retry-After": str(retry_after)},
+            headers={"Retry-After": str(max(account_retry_after, ip_retry_after))},
         )
 
     user = authenticate_user(db, str(payload.email), payload.password)
     if user is None:
-        login_rate_limiter.register_failure(rate_key)
+        # Enforce both per-account and per-source limits. A combined
+        # ``ip+email`` bucket alone can be bypassed by cycling email values.
+        login_rate_limiter.register_failure(account_rate_key)
+        login_rate_limiter.register_failure(ip_rate_key)
         raise _invalid_credentials()
 
-    login_rate_limiter.reset(rate_key)
+    login_rate_limiter.reset(account_rate_key)
     bundle = issue_token_pair(
         db,
         user,

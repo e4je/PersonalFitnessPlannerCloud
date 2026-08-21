@@ -15,13 +15,22 @@ def encode_cursor(payload: dict[str, Any]) -> str:
 def decode_cursor(cursor: str | None) -> dict[str, Any]:
     if cursor is None:
         return {}
+    if len(cursor) > 512:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_cursor", "message": "Cursor is malformed"},
+        )
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
-        value = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        value = json.loads(
+            base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True).decode("utf-8")
+        )
         if not isinstance(value, dict):
             raise ValueError
+        if "id" in value and (not isinstance(value["id"], str) or len(value["id"]) > 64):
+            raise ValueError
         return value
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError, UnicodeEncodeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "invalid_cursor", "message": "Cursor is malformed"},

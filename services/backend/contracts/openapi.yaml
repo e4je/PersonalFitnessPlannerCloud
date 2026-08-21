@@ -3671,6 +3671,7 @@ components:
           title: Refresh Token
         token_type:
           type: string
+          const: Bearer
           title: Token Type
           default: Bearer
         expires_in:

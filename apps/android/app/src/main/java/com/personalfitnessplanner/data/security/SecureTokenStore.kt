@@ -50,6 +50,7 @@ class SecureTokenStore(
     private fun readPersisted(): AuthTokens? = synchronized(lock) {
         val encoded = preferences.getString(KEY_ENCRYPTED_TOKENS, null) ?: return@synchronized null
         try {
+            require(encoded.length <= MAX_ENCRYPTED_VALUE_CHARS)
             val pieces = encoded.split('.', limit = 2)
             require(pieces.size == 2)
             val iv = Base64.decode(pieces[0], Base64.NO_WRAP)
@@ -57,15 +58,21 @@ class SecureTokenStore(
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
             val json = JSONObject(String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8))
+            val tokenType = json.optString(JSON_TOKEN_TYPE, "Bearer")
+            require(tokenType.equals("Bearer", ignoreCase = true))
+            val accessToken = json.getString(JSON_ACCESS_TOKEN)
+            val refreshToken = json.getString(JSON_REFRESH_TOKEN)
+            require(accessToken.isNotBlank() && accessToken.length <= MAX_TOKEN_CHARS)
+            require(refreshToken.isNotBlank() && refreshToken.length <= MAX_TOKEN_CHARS)
             AuthTokens(
-                accessToken = json.getString(JSON_ACCESS_TOKEN),
-                refreshToken = json.getString(JSON_REFRESH_TOKEN),
+                accessToken = accessToken,
+                refreshToken = refreshToken,
                 expiresAtEpochSeconds = if (json.isNull(JSON_EXPIRES_AT)) {
                     null
                 } else {
                     json.getLong(JSON_EXPIRES_AT)
                 },
-                tokenType = json.optString(JSON_TOKEN_TYPE, "Bearer"),
+                tokenType = "Bearer",
             )
         } catch (_: Exception) {
             preferences.edit().remove(KEY_ENCRYPTED_TOKENS).commit()
@@ -76,6 +83,11 @@ class SecureTokenStore(
     override fun write(tokens: AuthTokens) = synchronized(lock) {
         require(tokens.accessToken.isNotBlank()) { "Access token must not be blank" }
         require(tokens.refreshToken.isNotBlank()) { "Refresh token must not be blank" }
+        require(tokens.accessToken.length <= MAX_TOKEN_CHARS)
+        require(tokens.refreshToken.length <= MAX_TOKEN_CHARS)
+        require(tokens.tokenType.equals("Bearer", ignoreCase = true)) {
+            "Only Bearer authentication tokens are supported"
+        }
         val plaintext = JSONObject()
             .put(JSON_ACCESS_TOKEN, tokens.accessToken)
             .put(JSON_REFRESH_TOKEN, tokens.refreshToken)
@@ -128,6 +140,8 @@ class SecureTokenStore(
         private const val AES_KEY_BITS = 256
         private const val GCM_TAG_BITS = 128
         private const val KEY_ENCRYPTED_TOKENS = "ciphertext_v1"
+        private const val MAX_TOKEN_CHARS = 16 * 1024
+        private const val MAX_ENCRYPTED_VALUE_CHARS = 64 * 1024
         private const val JSON_ACCESS_TOKEN = "access_token"
         private const val JSON_REFRESH_TOKEN = "refresh_token"
         private const val JSON_EXPIRES_AT = "expires_at"

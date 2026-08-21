@@ -6,6 +6,7 @@ namespace PersonalFitnessPlanner.Infrastructure;
 
 public sealed class SettingsStore
 {
+    private const long MaxSettingsFileBytes = 256 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -23,13 +24,44 @@ public sealed class SettingsStore
                 return AppSettingsData.Default(_paths.DataDirectory);
             }
 
+            if (new FileInfo(_paths.SettingsPath).Length > MaxSettingsFileBytes)
+            {
+                return AppSettingsData.Default(_paths.DataDirectory);
+            }
+
             await using var stream = new FileStream(
                 _paths.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read,
                 16 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            return await JsonSerializer.DeserializeAsync<AppSettingsData>(stream, JsonOptions, cancellationToken).ConfigureAwait(false)
-                   ?? AppSettingsData.Default(_paths.DataDirectory);
+            var parsed = await JsonSerializer.DeserializeAsync<AppSettingsData>(stream, JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            var pathMatches = false;
+            try
+            {
+                pathMatches = parsed is not null && string.Equals(
+                    Path.GetFullPath(parsed.DataDirectory ?? string.Empty),
+                    _paths.DataDirectory,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+                pathMatches = false;
+            }
+            if (parsed is null || !pathMatches)
+            {
+                return AppSettingsData.Default(_paths.DataDirectory);
+            }
+            try
+            {
+                Validate(parsed);
+                return parsed;
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+            {
+                return AppSettingsData.Default(_paths.DataDirectory);
+            }
         }
-        catch (JsonException)
+        catch (Exception exception) when (
+            exception is JsonException or IOException or UnauthorizedAccessException)
         {
             // A partially written legacy settings file must not prevent startup.
             return AppSettingsData.Default(_paths.DataDirectory);
@@ -81,9 +113,20 @@ public sealed class SettingsStore
         {
             throw new ArgumentException("重量单位只能是 kg 或 lb。", nameof(settings));
         }
-        if (string.IsNullOrWhiteSpace(settings.TimeZone) || string.IsNullOrWhiteSpace(settings.DataDirectory))
+        if (string.IsNullOrWhiteSpace(settings.ApiBaseUrl) ||
+            string.IsNullOrWhiteSpace(settings.TimeZone) ||
+            string.IsNullOrWhiteSpace(settings.DataDirectory) ||
+            string.IsNullOrWhiteSpace(settings.TrainingDays) ||
+            string.IsNullOrWhiteSpace(settings.Theme) ||
+            string.IsNullOrWhiteSpace(settings.Version))
         {
             throw new ArgumentException("时区和数据目录不能为空。", nameof(settings));
+        }
+        if (settings.ApiBaseUrl.Length > 2048 || settings.TimeZone.Length > 128 ||
+            settings.DataDirectory.Length > 4096 || settings.TrainingDays.Length > 128 ||
+            settings.Theme.Length > 32 || settings.Version.Length > 64)
+        {
+            throw new ArgumentException("设置字段长度超过安全上限。", nameof(settings));
         }
         try
         {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,7 +42,7 @@ class LogoutRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str | None = None
-    token_type: str = "Bearer"
+    token_type: Literal["Bearer"] = "Bearer"
     expires_in: int
     expires_at: int
 

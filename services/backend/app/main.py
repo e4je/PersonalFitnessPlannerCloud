@@ -28,16 +28,22 @@ app = FastAPI(
         "with offline-friendly idempotent workout synchronization."
     ),
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # Interactive API documentation exposes the complete authenticated route
+    # surface. Keep it available for local/test workflows, but remove it from
+    # production deployments unless an operator explicitly hosts a separate,
+    # access-controlled copy of the schema.
+    docs_url=None if settings.environment == "production" else "/docs",
+    redoc_url=None if settings.environment == "production" else "/redoc",
+    openapi_url=None if settings.environment == "production" else "/openapi.json",
 )
 
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    # Authentication uses bearer tokens rather than cookies. Disabling
+    # credentialed CORS removes ambient-cookie/CSRF behavior for browser calls.
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "X-Request-ID"],
     expose_headers=["X-Request-ID", "ETag"],

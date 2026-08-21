@@ -280,7 +280,11 @@ class FitnessViewModel(private val container: AppContainer) : ViewModel() {
                 refreshToken = refreshToken,
                 expiresAtEpochSeconds = response.expiresAtEpochSeconds
                     ?: response.expiresInSeconds?.let { System.currentTimeMillis() / 1_000 + it },
-                tokenType = response.tokenType.ifBlank { "Bearer" },
+                tokenType = "Bearer".also {
+                    check(response.tokenType.equals("Bearer", ignoreCase = true)) {
+                        "Unsupported authentication scheme"
+                    }
+                },
             )
             // Bootstrap with an explicit transient bearer token. The process-wide store remains on
             // the old identity until Room has either rejected the switch (pending data) or replaced

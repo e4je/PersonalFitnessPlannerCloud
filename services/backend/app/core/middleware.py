@@ -94,7 +94,25 @@ class RequestContextMiddleware:
             nonlocal response_status
             if message["type"] == "http.response.start":
                 response_status = int(message["status"])
-                MutableHeaders(scope=message)["X-Request-ID"] = request_id
+                response_headers = MutableHeaders(scope=message)
+                response_headers["X-Request-ID"] = request_id
+                # The API returns health and personal data. These defaults
+                # prevent browser sniffing, framing, referrer leakage and
+                # accidental intermediary caching while respecting an
+                # endpoint's explicit Cache-Control choice.
+                response_headers.setdefault("X-Content-Type-Options", "nosniff")
+                response_headers.setdefault("X-Frame-Options", "DENY")
+                response_headers.setdefault("Referrer-Policy", "no-referrer")
+                response_headers.setdefault(
+                    "Permissions-Policy",
+                    "camera=(), microphone=(), geolocation=(), usb=()",
+                )
+                response_headers.setdefault("Cache-Control", "no-store")
+                if settings.environment == "production":
+                    response_headers.setdefault(
+                        "Strict-Transport-Security",
+                        "max-age=31536000; includeSubDomains",
+                    )
             await send(message)
 
         declared_length = self._declared_content_length(headers)

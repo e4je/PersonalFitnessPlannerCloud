@@ -98,7 +98,7 @@ def record_sync_change(
         operation="delete" if requested_operation == "DELETE" else "update",
         payload_json=jsonable_encoder(payload) if payload is not None else None,
         actor_user_id=actor_user_id,
-        request_id=request_id,
+        request_id=request_id[:64] if request_id else None,
         changed_at=utcnow(),
     )
     db.add(change)
@@ -122,7 +122,7 @@ def record_conflict_audit(
         action="SYNC_CONFLICT",
         entity_type=canonical_entity_type(entity_type),
         entity_id=str(entity_id),
-        request_id=request_id,
+        request_id=request_id[:64] if request_id else None,
         before_json=jsonable_encoder(before) if before is not None else None,
         after_json=None,
         metadata_json={"reason": reason, "attempted": jsonable_encoder(attempted)},
@@ -174,14 +174,22 @@ def encode_sync_cursor(sequence: int) -> str:
 def decode_sync_cursor(cursor: str | None) -> int:
     if cursor is None or not cursor.strip():
         return 0
+    normalized = cursor.strip()
+    # SyncChange.sequence is a signed BIGINT/SQLite INTEGER. Reject oversized
+    # decimal input before Python/SQLAlchemy spend work converting it.
+    if len(normalized) > 19:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_cursor", "message": "cursor is not valid"},
+        )
     try:
-        value = int(cursor)
+        value = int(normalized)
     except (TypeError, ValueError) as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "invalid_cursor", "message": "cursor is not valid"},
         ) from error
-    if value < 0:
+    if value < 0 or value > 9_223_372_036_854_775_807:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "invalid_cursor", "message": "cursor is not valid"},
@@ -343,17 +351,26 @@ def get_incremental_changes(
 _CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 
 
-def normalize_client_payload(value: Any) -> Any:
+def normalize_client_payload(value: Any, *, _depth: int = 0) -> Any:
     """Accept Windows camelCase and Android snake_case inside generic sync JSON."""
 
+    if _depth > 32:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "payload_too_deep",
+                "message": "Sync payload nesting exceeds the supported limit",
+            },
+        )
+
     if isinstance(value, list):
-        return [normalize_client_payload(item) for item in value]
+        return [normalize_client_payload(item, _depth=_depth + 1) for item in value]
     if not isinstance(value, dict):
         return value
     normalized: dict[str, Any] = {}
     for key, item in value.items():
         snake = _CAMEL_BOUNDARY.sub("_", str(key)).lower()
-        normalized[snake] = normalize_client_payload(item)
+        normalized[snake] = normalize_client_payload(item, _depth=_depth + 1)
     # Windows readiness/cardio domain records use these compact names.
     if "fatigue_score" not in normalized and "fatigue" in normalized:
         normalized["fatigue_score"] = normalized["fatigue"]

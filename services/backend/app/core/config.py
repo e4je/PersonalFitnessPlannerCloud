@@ -93,10 +93,22 @@ class Settings(BaseSettings):
     refresh_token_days: int = Field(default=30, ge=1, le=365)
 
     cors_origins: list[str] = ["http://localhost", "http://127.0.0.1"]
-    max_request_body_bytes: int = Field(default=2_097_152, ge=1024)
-    login_attempts_per_minute: int = Field(default=10, ge=1)
-    sync_retention_days: int = Field(default=90, ge=1)
+    # Keep resource-protection settings bounded even when they come from an
+    # operator-controlled environment variable.  An accidentally huge value
+    # here would otherwise turn a deployment configuration mistake into a
+    # straightforward memory/CPU denial of service.
+    max_request_body_bytes: int = Field(default=2_097_152, ge=1024, le=64 * 1024 * 1024)
+    login_attempts_per_minute: int = Field(default=10, ge=1, le=10_000)
+    sync_retention_days: int = Field(default=90, ge=1, le=3_650)
     log_level: str = "INFO"
+
+    @field_validator("jwt_algorithm", mode="before")
+    @classmethod
+    def validate_jwt_algorithm(cls, value: object) -> str:
+        normalized = str(value).strip().upper()
+        if normalized not in {"HS256", "HS384", "HS512"}:
+            raise ValueError("JWT_ALGORITHM must be one of HS256, HS384, or HS512")
+        return normalized
 
     @field_validator("cors_origins", mode="before")
     @classmethod

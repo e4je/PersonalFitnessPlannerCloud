@@ -80,12 +80,16 @@ class TokenRefreshAuthenticator(
                     tokenStore.clear()
                     return null
                 }
+                if (!body.tokenType.equals("Bearer", ignoreCase = true)) {
+                    tokenStore.clear()
+                    return null
+                }
                 val refreshed = AuthTokens(
                     accessToken = body.accessToken,
                     refreshToken = body.refreshToken?.takeIf(String::isNotBlank) ?: latest.refreshToken,
                     expiresAtEpochSeconds = body.expiresAtEpochSeconds
                         ?: body.expiresInSeconds?.let { nowEpochSeconds() + it },
-                    tokenType = body.tokenType.ifBlank { "Bearer" },
+                    tokenType = "Bearer",
                 )
                 try {
                     tokenStore.write(refreshed)
@@ -180,7 +184,7 @@ class ApiClientFactory private constructor(
      * and atomically switch account scope before background workers can observe the new identity.
      */
     suspend fun preflightBootstrap(tokens: AuthTokens): BootstrapDto =
-        bootstrapIdentityApi.bootstrap("${tokens.tokenType.ifBlank { "Bearer" }} ${tokens.accessToken}")
+        bootstrapIdentityApi.bootstrap("Bearer ${tokens.accessToken}")
 
     /** Returns true when the scheme/host/port changed. Tokens never cross that boundary. */
     fun updateBaseUrl(

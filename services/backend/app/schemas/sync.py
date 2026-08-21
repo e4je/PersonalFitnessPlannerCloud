@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SyncModel(BaseModel):
@@ -38,6 +38,14 @@ class SyncOperationIn(SyncModel):
     operation: str = Field(min_length=1, max_length=32)
     payload: dict[str, Any] | None = None
 
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_idempotency_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(ord(char) < 0x20 or ord(char) == 0x7F for char in normalized):
+            raise ValueError("idempotency_key contains control characters")
+        return normalized
+
     @model_validator(mode="after")
     def normalize_wire_values(self) -> "SyncOperationIn":
         self.entity_type = self.entity_type.strip().lower().replace("-", "_")
@@ -46,9 +54,20 @@ class SyncOperationIn(SyncModel):
 
 
 class SyncBatchIn(SyncModel):
+    # The wire contract historically allowed opaque client batch identifiers.
+    # Keep that compatibility while bounding the value to the database's
+    # resource-id width so oversized input cannot trigger a persistence error.
     batch_id: UUID | str
     sent_at: datetime
     operations: list[SyncOperationIn] = Field(min_length=1, max_length=100)
+
+    @field_validator("batch_id")
+    @classmethod
+    def validate_batch_id(cls, value: UUID | str) -> UUID | str:
+        text = str(value)
+        if len(text) > 36 or any(ord(char) < 0x20 or ord(char) == 0x7F for char in text):
+            raise ValueError("batch_id is invalid")
+        return value
 
     @model_validator(mode="after")
     def validate_operation_ids(self) -> "SyncBatchIn":

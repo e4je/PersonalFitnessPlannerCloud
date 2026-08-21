@@ -15,6 +15,7 @@ public sealed record SyncBatchResult(
 public sealed class FitnessApiClient
 {
     private const int MaxErrorBodyBytes = 32 * 1024;
+    private const int MaxJsonBodyBytes = 32 * 1024 * 1024;
     private const int MaxSafeErrorFieldLength = 300;
     private static readonly string[] SafeErrorFieldNames = ["code", "message", "detail"];
     private static readonly string[] SensitiveErrorTerms =
@@ -177,13 +178,12 @@ public sealed class FitnessApiClient
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
 
-        var responseJson = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(responseJson))
+        if (response.StatusCode == HttpStatusCode.NoContent || response.Content.Headers.ContentLength == 0)
         {
+            // No explicit acknowledgements means no outbox item is complete.
             return new SyncBatchResult([], []);
         }
-
-        using var document = JsonDocument.Parse(responseJson);
+        using var document = await ReadJsonDocumentAsync(response.Content, cancellationToken, allowEmpty: true).ConfigureAwait(false);
         var requestedIds = items.Select(item => item.Id).ToHashSet();
         var accepted = new HashSet<Guid>();
         var failures = new List<SyncBatchFailure>();
@@ -249,7 +249,7 @@ public sealed class FitnessApiClient
         using var response = await SendAuthorizedAsync(_ => new HttpRequestMessage(HttpMethod.Get, relative), cancellationToken)
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
+        using var document = await ReadJsonDocumentAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
         var changes = new List<SyncChange>();
         if (TryGetProperty(root, out var items, "changes", "items") && items.ValueKind == JsonValueKind.Array)
@@ -289,7 +289,7 @@ public sealed class FitnessApiClient
         using var response = await SendAuthorizedAsync(
             _ => new HttpRequestMessage(HttpMethod.Get, "api/v1/bootstrap"), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
+        using var document = await ReadJsonDocumentAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
         if (TryGetProperty(root, out var data, "data", "bootstrap") && data.ValueKind == JsonValueKind.Object)
         {
@@ -325,7 +325,7 @@ public sealed class FitnessApiClient
         }
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         if (response.Content.Headers.ContentLength == 0) return default;
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
+        using var document = await ReadJsonDocumentAsync(response.Content, cancellationToken).ConfigureAwait(false);
         return document.RootElement.Clone();
     }
 
@@ -525,7 +525,7 @@ public sealed class FitnessApiClient
         string apiOrigin,
         CancellationToken cancellationToken)
     {
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
+        using var document = await ReadJsonDocumentAsync(response.Content, cancellationToken).ConfigureAwait(false);
         var root = document.RootElement;
         if (TryGetProperty(root, out var data, "data", "tokens") && data.ValueKind == JsonValueKind.Object) root = data;
         var access = GetString(root, "access_token", "accessToken");
@@ -570,8 +570,45 @@ public sealed class FitnessApiClient
 
     private static JsonElement ParsePayload(string json)
     {
-        using var document = JsonDocument.Parse(json);
+        using var document = JsonDocument.Parse(
+            json,
+            new JsonDocumentOptions { MaxDepth = 64, AllowTrailingCommas = false });
         return document.RootElement.Clone();
+    }
+
+    private static async Task<JsonDocument> ReadJsonDocumentAsync(
+        HttpContent content,
+        CancellationToken cancellationToken,
+        bool allowEmpty = false)
+    {
+        if (content.Headers.ContentLength is > MaxJsonBodyBytes)
+        {
+            throw new InvalidDataException("API 响应超过安全大小上限。");
+        }
+
+        await using var source = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            var read = await source.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            if (buffer.Length + read > MaxJsonBodyBytes)
+            {
+                throw new InvalidDataException("API 响应超过安全大小上限。");
+            }
+            buffer.Write(chunk, 0, read);
+        }
+        if (buffer.Length == 0)
+        {
+            if (allowEmpty) return JsonDocument.Parse("{}");
+            throw new InvalidDataException("API 响应为空。");
+        }
+        buffer.Position = 0;
+        return await JsonDocument.ParseAsync(
+            buffer,
+            new JsonDocumentOptions { MaxDepth = 64, AllowTrailingCommas = false },
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)

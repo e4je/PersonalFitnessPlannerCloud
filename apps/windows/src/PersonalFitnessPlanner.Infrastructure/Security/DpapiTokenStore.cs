@@ -8,6 +8,7 @@ namespace PersonalFitnessPlanner.Infrastructure.Security;
 /// <summary>Encrypts credentials for the current Windows user with DPAPI.</summary>
 public sealed class DpapiTokenStore
 {
+    private const int MaxTokenFileBytes = 64 * 1024;
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("PersonalFitnessPlanner/auth/v1");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppPaths _paths;
@@ -31,9 +32,22 @@ public sealed class DpapiTokenStore
             var protectedBytes = ProtectedData.Protect(plain, Entropy, DataProtectionScope.CurrentUser);
             CryptographicOperations.ZeroMemory(plain);
             var temporaryPath = _paths.TokenPath + ".tmp";
-            await File.WriteAllBytesAsync(temporaryPath, protectedBytes, cancellationToken).ConfigureAwait(false);
-            File.Move(temporaryPath, _paths.TokenPath, true);
-            File.SetAttributes(_paths.TokenPath, File.GetAttributes(_paths.TokenPath) | FileAttributes.Hidden);
+            try
+            {
+                await File.WriteAllBytesAsync(temporaryPath, protectedBytes, cancellationToken).ConfigureAwait(false);
+                File.Move(temporaryPath, _paths.TokenPath, true);
+                File.SetAttributes(_paths.TokenPath, File.GetAttributes(_paths.TokenPath) | FileAttributes.Hidden);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(protectedBytes);
+                try
+                {
+                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
         finally
         {
@@ -53,7 +67,10 @@ public sealed class DpapiTokenStore
 
             try
             {
+                var fileInfo = new FileInfo(_paths.TokenPath);
+                if (fileInfo.Length <= 0 || fileInfo.Length > MaxTokenFileBytes) return null;
                 var protectedBytes = await File.ReadAllBytesAsync(_paths.TokenPath, cancellationToken).ConfigureAwait(false);
+                if (protectedBytes.Length > MaxTokenFileBytes) return null;
                 var plain = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
                 try
                 {

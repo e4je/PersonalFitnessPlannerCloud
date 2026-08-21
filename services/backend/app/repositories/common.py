@@ -155,7 +155,12 @@ def add_audit_log(
         action=action[:64],
         entity_type=entity_type[:64],
         entity_id=entity_id,
-        request_id=request_id,
+        # RequestContextMiddleware accepts a wider correlation-id header for
+        # tracing, while the audit schema is intentionally bounded. Truncate
+        # before SQLAlchemy hands the value to a strict MySQL column so a
+        # forged oversized header cannot turn an otherwise valid mutation into
+        # a database error.
+        request_id=request_id[:64] if request_id else None,
         ip_address=ip_address,
         user_agent=user_agent[:512] if user_agent else None,
         before_json=before,
@@ -186,7 +191,7 @@ def add_sync_change(
         operation=operation,
         payload_json=payload,
         actor_user_id=actor_user_id,
-        request_id=request_id,
+        request_id=request_id[:64] if request_id else None,
     )
     db.add(change)
     return change
