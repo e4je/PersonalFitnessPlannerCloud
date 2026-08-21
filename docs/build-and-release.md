@@ -36,7 +36,7 @@ PersonalFitnessPlanner-<tag>-windows-x64.exe
 SHA256SUMS.txt
 ```
 
-已有 tag 可从 GitHub Actions 的 `release` workflow 使用 `Run workflow`，输入 tag 后补发或覆盖同名资产。Release job 只在两个平台构建都成功后获得 `contents: write` 权限。
+已有且位于默认分支历史中的 tag，可从 GitHub Actions 的 `release` workflow 使用 `Run workflow`，输入 tag 后补发或覆盖同名资产。Release job 只在两个平台构建都成功后获得 `contents: write` 权限。
 
 自动发布的是可安装 Debug APK，application ID 为 `com.personalfitnessplanner.debug`。GitHub Runner 生成的调试签名不保证跨构建稳定；后续 APK 若无法覆盖安装，需要先同步/备份个人数据，再卸载旧 Debug APK。需要稳定原地升级时，应配置受保护的固定签名密钥并改为签名 Release APK。
 

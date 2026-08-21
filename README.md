@@ -103,7 +103,7 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 - Windows x64 自包含单文件 EXE；
 - `SHA256SUMS.txt` 校验清单。
 
-已有 tag 可在 GitHub Actions 的 `release` workflow 中手动输入 tag 重新发布。Debug APK 使用 CI 临时调试签名，后续构建的证书可能不同；Android 若拒绝覆盖安装，需要先卸载旧 Debug APK。个人数据应先完成云端同步或备份。
+已有且位于默认分支历史中的 tag，可在 GitHub Actions 的 `release` workflow 中手动输入 tag 重新发布。Debug APK 使用 CI 临时调试签名，后续构建的证书可能不同；Android 若拒绝覆盖安装，需要先卸载旧 Debug APK。个人数据应先完成云端同步或备份。
 
 ### Android
 
