@@ -1,0 +1,210 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing semantic-version tag to publish, for example 0.0.1 or v0.0.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Validate release tag
+        id: release
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          tag="$CANDIDATE_TAG"
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Release tag must be a semantic version such as 0.0.1 or v0.0.1." >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/$tag"; then
+            echo "Tag does not exist: $tag" >&2
+            exit 1
+          fi
+          commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "Tag must point to a commit contained in the default branch: $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check out verified release commit
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: git checkout --detach "$RELEASE_COMMIT"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          # A manual release can build an older tag. Keep that checkout from
+          # writing executable build state into caches used by later runs.
+          cache-read-only: true
+      - name: Unit tests
+        working-directory: apps/android
+        run: ./gradlew test --stacktrace
+      - name: Lint
+        working-directory: apps/android
+        run: ./gradlew lint --max-workers=1 --stacktrace
+      - name: Assemble installable debug APK
+        working-directory: apps/android
+        run: ./gradlew assembleDebug --stacktrace
+      - name: Stage Android release asset
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(apps/android/app/build/outputs/apk/debug/*.apk)
+          if (( ${#apks[@]} != 1 )); then
+            echo "Expected exactly one debug APK, found ${#apks[@]}." >&2
+            exit 1
+          fi
+          mkdir -p release-assets
+          cp -- "${apks[0]}" "release-assets/PersonalFitnessPlanner-${RELEASE_TAG}-android-debug.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: release-assets/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check out verified release commit
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: git checkout --detach "$RELEASE_COMMIT"
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore
+        run: dotnet restore apps/windows/PersonalFitnessPlanner.sln
+      - name: Audit NuGet dependencies
+        run: dotnet restore apps/windows/PersonalFitnessPlanner.sln -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high --force-evaluate
+      - name: Build
+        run: dotnet build apps/windows/PersonalFitnessPlanner.sln -c Release --no-restore
+      - name: Test
+        run: dotnet test apps/windows/PersonalFitnessPlanner.sln -c Release --no-build
+      - name: Publish and smoke test
+        shell: pwsh
+        run: ./apps/windows/scripts/publish.ps1 -SkipTests
+      - name: Stage Windows release asset
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = Join-Path $env:GITHUB_WORKSPACE "apps/windows/artifacts/PersonalFitnessPlanner.exe"
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Published EXE is missing: $source"
+          }
+          $assetRoot = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+          New-Item -ItemType Directory -Force -Path $assetRoot | Out-Null
+          $target = Join-Path $assetRoot "PersonalFitnessPlanner-$env:RELEASE_TAG-windows-x64.exe"
+          Copy-Item -LiteralPath $source -Destination $target -Force
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: release-assets/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [prepare, android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify assets and generate SHA-256 manifest
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          apk="PersonalFitnessPlanner-${RELEASE_TAG}-android-debug.apk"
+          exe="PersonalFitnessPlanner-${RELEASE_TAG}-windows-x64.exe"
+          test -f "$apk"
+          test -f "$exe"
+          sha256sum "$apk" "$exe" > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            notes_file="$(mktemp)"
+            printf '%s\n' \
+              "Automated personal build from commit \`$RELEASE_COMMIT\`." \
+              "" \
+              "- Android: installable Debug APK (application ID \`com.personalfitnessplanner.debug\`)." \
+              "- Windows: self-contained Windows x64 single-file EXE." \
+              "- Verify downloads with \`SHA256SUMS.txt\`." \
+              "" \
+              "The Debug APK uses CI-generated debug signing. A later build may require uninstalling the previous Debug APK before installation." \
+              > "$notes_file"
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --notes-file "$notes_file"
+          fi
+          gh release upload "$RELEASE_TAG" \
+            release-assets/*.apk \
+            release-assets/*.exe \
+            release-assets/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
