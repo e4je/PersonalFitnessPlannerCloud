@@ -62,6 +62,10 @@ jobs:
           java-version: "17"
       - uses: android-actions/setup-android@v4
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          # A manual release can build an older tag. Keep that checkout from
+          # writing executable build state into caches used by later runs.
+          cache-read-only: true
       - name: Unit tests
         working-directory: apps/android
         run: ./gradlew test --stacktrace
