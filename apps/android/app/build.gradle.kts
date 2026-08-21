@@ -121,7 +121,7 @@ dependencies {
     testImplementation("androidx.room:room-testing:2.8.4")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
-    testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation("com.google.truth:truth:1.4.5")
     testImplementation("org.robolectric:robolectric:4.14.1")
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
