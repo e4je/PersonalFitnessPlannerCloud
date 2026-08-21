@@ -109,6 +109,9 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     kapt("androidx.room:room-compiler:2.8.4")
+    // Room 2.8.4 reads Kotlin metadata during kapt; align its processor
+    // classpath with Kotlin 2.4-generated metadata without moving to Room 3.
+    kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.10")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
