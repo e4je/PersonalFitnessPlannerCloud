@@ -1,10 +1,12 @@
 import java.net.URI
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.kapt")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 val apiBaseUrl = providers.gradleProperty("PFP_API_BASE_URL")
@@ -25,7 +27,7 @@ val apiBaseUrl = providers.gradleProperty("PFP_API_BASE_URL")
 
 android {
     namespace = "com.personalfitnessplanner"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.personalfitnessplanner"
@@ -65,10 +67,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -85,11 +83,18 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+        optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
 
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
@@ -105,6 +110,9 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")
     kapt("androidx.room:room-compiler:2.8.4")
+    // Room 2.8.4 reads Kotlin metadata during kapt; align its processor
+    // classpath with Kotlin 2.4-generated metadata without moving to Room 3.
+    kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.10")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
@@ -114,7 +122,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
-    kapt("com.squareup.moshi:moshi-kotlin-codegen:1.15.2")
+    ksp("com.squareup.moshi:moshi-kotlin-codegen:1.15.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     testImplementation("junit:junit:4.13.2")

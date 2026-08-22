@@ -27,7 +27,7 @@ android/
 ## 环境
 
 - JDK 17 或 21（JBR 25 与当前 Gradle/Kotlin 组合不兼容）
-- Android SDK Platform 35、Build Tools 35.0.0、Platform Tools
+- Android SDK Platform 36、匹配的 Build Tools 36.x、Platform Tools
 - Android 8.0 / API 26 或更高设备
 
 Android Studio 打开本目录即可。命令行首次构建前复制 `local.properties.example` 为 `local.properties` 并填写 SDK 路径。

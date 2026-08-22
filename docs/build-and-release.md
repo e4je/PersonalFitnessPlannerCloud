@@ -6,7 +6,7 @@
 
 - Docker Engine + Compose plugin
 - Python 3.12
-- JDK 17 或 21、Android SDK Platform/Build Tools 35（本轮确认 JBR 25 与当前 Gradle/Kotlin 组合不兼容）
+- JDK 17 或 21、Android SDK Platform/Build Tools 36（本轮确认 JBR 25 与当前 Gradle/Kotlin 组合不兼容）
 - .NET 8 SDK、Windows 10/11 x64（Windows publish 必须在 Windows）
 
 先运行 `scripts/bootstrap-dev.ps1 -NoStart` 准备根 `.env` 和后端开发环境。Android 需自行创建未提交的 `apps/android/local.properties`。

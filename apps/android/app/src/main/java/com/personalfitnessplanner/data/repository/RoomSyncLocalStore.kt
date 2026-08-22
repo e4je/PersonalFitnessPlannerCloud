@@ -353,7 +353,14 @@ class RoomSyncLocalStore(
             WHERE id = ?
               AND version <= ?
             """.trimIndent(),
-            arrayOf(deletedAt, deletedAt, change.version, change.version, effectiveId, change.version),
+            arrayOf<Any?>(
+                deletedAt,
+                deletedAt,
+                change.version,
+                change.version,
+                effectiveId,
+                change.version,
+            ),
         )
     }
 
