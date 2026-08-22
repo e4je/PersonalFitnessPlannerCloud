@@ -20,7 +20,54 @@
       </div>
     </header>
 
-    <main class="page" id="auth-view">
+    <main class="page hidden" id="setup-view">
+      <section class="setup-layout" aria-labelledby="setup-title">
+        <div class="intro-panel">
+          <p class="eyebrow">FIRST-RUN SETUP</p>
+          <h1 id="setup-title">先连接数据库，再开始使用云端。</h1>
+          <p class="intro-copy">后端会检查 MySQL，并自动创建或升级固定数据库 <strong>fitness</strong>。连接信息只保存在服务器的私有运行配置中，不会发送给 Android 或 Windows 客户端。</p>
+          <div class="feature-list" aria-label="初始化内容">
+            <span><b>1</b> 检查 MySQL 版本与数据库状态</span>
+            <span><b>2</b> 创建或升级表结构</span>
+            <span><b>3</b> 写入默认训练计划与系统角色</span>
+          </div>
+        </div>
+        <div class="card setup-card">
+          <div class="card-heading">
+            <div><p class="eyebrow">DATABASE</p><h2>数据库连接</h2></div>
+            <span class="badge">fitness</span>
+          </div>
+          <form id="setup-form" class="form-stack" novalidate>
+            <div class="form-grid setup-form-grid">
+              <label>MySQL 地址<input name="host" autocomplete="off" required maxlength="255" aria-describedby="setup-host-hint"><span id="setup-host-hint" class="field-hint">内置容器填 mysql；外部数据库填主机名或 IP，不含 http://</span></label>
+              <label>端口<input name="port" type="number" inputmode="numeric" value="3306" required min="1" max="65535"></label>
+            </div>
+            <label>数据库账号<input name="username" autocomplete="username" required maxlength="128"></label>
+            <label>数据库密码<input name="password" type="password" autocomplete="off" required maxlength="1024"></label>
+            <label>一次性初始化码<input name="setup_token" type="password" autocomplete="off" required maxlength="512" aria-describedby="setup-token-hint"><span id="setup-token-hint" class="field-hint">在服务器执行 <code>docker compose logs backend</code>，查找 setup_token。</span></label>
+            <div class="setup-notice">数据库名已固定为 <code>fitness</code>，页面不会接收其他库名。</div>
+            <button id="setup-submit" class="button button-primary" type="submit">检查并初始化数据库</button>
+          </form>
+          <p id="setup-error" class="error" role="alert" aria-live="polite"></p>
+
+          <section id="setup-result" class="hidden" aria-labelledby="setup-result-title">
+            <div class="success-mark" aria-hidden="true">✓</div>
+            <h2 id="setup-result-title">数据库初始化完成</h2>
+            <p id="setup-result-summary" class="muted"></p>
+            <dl class="setup-result-grid">
+              <div><dt>MySQL</dt><dd id="setup-mysql-version">—</dd></div>
+              <div><dt>排序规则</dt><dd id="setup-collation">—</dd></div>
+              <div><dt>数据表</dt><dd id="setup-table-count">—</dd></div>
+              <div><dt>迁移版本</dt><dd id="setup-revision">—</dd></div>
+              <div><dt>默认数据</dt><dd id="setup-seed-status">—</dd></div>
+            </dl>
+            <button id="setup-continue" class="button button-primary" type="button">进入登录与注册</button>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <main class="page hidden" id="auth-view">
       <section class="auth-layout" aria-labelledby="auth-title">
         <div class="intro-panel">
           <p class="eyebrow">YOUR TRAINING, IN SYNC</p>
@@ -141,6 +188,7 @@
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </div>
+  <noscript><p class="noscript-message">首次配置和 Web 控制台需要启用 JavaScript。</p></noscript>
   <script type="module" src="/web/app.js"></script>
 </body>
 </html>

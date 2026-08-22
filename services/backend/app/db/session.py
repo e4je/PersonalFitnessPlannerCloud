@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from threading import RLock
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -10,9 +11,13 @@ from app.core.config import settings
 
 def build_engine(database_url: str | None = None) -> Engine:
     url = database_url or settings.database_url
+    if not url:
+        raise DatabaseNotConfiguredError("Database setup has not been completed")
     connect_args: dict[str, object] = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
+    elif url.startswith("mysql+pymysql"):
+        connect_args["connect_timeout"] = 10
 
     engine = create_engine(
         url,
@@ -42,12 +47,49 @@ def build_engine(database_url: str | None = None) -> Engine:
     return engine
 
 
-engine = build_engine()
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+class DatabaseNotConfiguredError(RuntimeError):
+    pass
+
+
+_engine_lock = RLock()
+engine: Engine | None = None
+SessionLocal = sessionmaker(autoflush=False, expire_on_commit=False)
+
+
+def configure_database(database_url: str) -> Engine:
+    """Atomically install a new engine for future sessions."""
+
+    new_engine = build_engine(database_url)
+    global engine
+    with _engine_lock:
+        old_engine = engine
+        engine = new_engine
+        SessionLocal.configure(bind=new_engine)
+    if old_engine is not None and old_engine is not new_engine:
+        old_engine.dispose()
+    return new_engine
+
+
+def get_engine() -> Engine:
+    with _engine_lock:
+        if engine is None:
+            raise DatabaseNotConfiguredError("Database setup has not been completed")
+        return engine
+
+
+def is_database_configured() -> bool:
+    with _engine_lock:
+        return engine is not None
+
+
+if settings.database_configured:
+    configure_database(settings.database_url)
 
 
 def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
+    # Capture the engine at request start. Existing sessions retain their bind
+    # if first-run setup installs the process-wide factory concurrently.
+    db = SessionLocal(bind=get_engine())
     try:
         yield db
     finally:

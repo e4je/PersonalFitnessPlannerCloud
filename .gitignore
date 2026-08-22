@@ -44,6 +44,7 @@ apps/windows/.vs/
 # Runtime data and generated delivery artifacts
 services/backend/backups/*
 !services/backend/backups/.gitkeep
+services/backend/.runtime/
 artifacts/*
 !artifacts/.gitkeep
 apps/android/artifacts/

@@ -12,6 +12,7 @@ const state = {
   plans: [],
   selectedPlan: null,
   registrationEnabled: true,
+  setup: null,
   refreshInFlight: null,
 };
 
@@ -69,12 +70,27 @@ function clearSession() {
   state.bootstrap = null;
   state.selectedUser = null;
   state.selectedPlan = null;
-  $("#dashboard-view").classList.add("hidden");
-  $("#auth-view").classList.remove("hidden");
+  showAuth();
   $("#logout-button").classList.add("hidden");
   $("#connection-state").textContent = "未连接";
   $("#connection-state").classList.remove("connected", "error");
   $$(".admin-only").forEach((element) => element.classList.add("hidden"));
+}
+
+function showAuth() {
+  $("#setup-view").classList.add("hidden");
+  $("#dashboard-view").classList.add("hidden");
+  $("#auth-view").classList.remove("hidden");
+}
+
+function showSetup() {
+  $("#auth-view").classList.add("hidden");
+  $("#dashboard-view").classList.add("hidden");
+  $("#setup-view").classList.remove("hidden");
+  $("#logout-button").classList.add("hidden");
+  const connection = $("#connection-state");
+  connection.textContent = "等待初始化";
+  connection.classList.remove("connected", "error");
 }
 
 function showToast(message, isError = false) {
@@ -93,6 +109,22 @@ function errorMessage(error) {
     if (detail.message) return detail.message;
   }
   return error?.message || "请求失败，请稍后重试";
+}
+
+function setupErrorMessage(error) {
+  const code = error?.data?.detail?.code;
+  const messages = {
+    invalid_setup_token: "一次性初始化码不正确，请从后端启动日志复制。",
+    setup_rate_limited: "尝试次数过多，请稍后再试。",
+    database_password_invalid: "数据库密码必须为 1–1024 个字符。",
+    database_connection_failed: "无法连接 MySQL，或该账号没有创建/访问 fitness 数据库的权限。",
+    database_initialization_failed: "已经连接 MySQL，但表结构升级或默认数据初始化失败。请查看后端日志。",
+    setup_persistence_failed: "数据库已初始化，但后端无法保存私有配置。请检查 /app-data 的写入权限。",
+    setup_storage_unavailable: "后端运行配置目录不可写，请检查 /app-data 的挂载和权限。",
+    setup_in_progress: "另一个初始化请求正在执行，请稍后再试。",
+    setup_complete: "数据库已经配置完成，请刷新页面。",
+  };
+  return messages[code] || errorMessage(error);
 }
 
 async function refreshAccessToken() {
@@ -181,11 +213,74 @@ async function loadRegistrationStatus() {
 }
 
 function showDashboard() {
+  $("#setup-view").classList.add("hidden");
   $("#auth-view").classList.add("hidden");
   $("#dashboard-view").classList.remove("hidden");
   $("#logout-button").classList.remove("hidden");
   $$(".superuser-only").forEach((element) => element.classList.toggle("hidden", !isSuperuser()));
   $$(".admin-only").forEach((element) => element.classList.toggle("hidden", !isAdmin()));
+}
+
+async function loadSetupStatus() {
+  try {
+    const result = await api("/setup/status", {}, false);
+    state.setup = result;
+    if (!result.setup_required) return false;
+    showSetup();
+    const form = $("#setup-form");
+    if (!form.elements.host.value) form.elements.host.value = result.default_host || "127.0.0.1";
+    form.elements.port.value = String(result.default_port || 3306);
+    if (!form.elements.username.value) form.elements.username.value = result.default_username || "fitness";
+    return true;
+  } catch (error) {
+    showSetup();
+    $("#setup-form").classList.add("hidden");
+    $("#setup-error").textContent = "无法读取后端初始化状态，请确认服务已正常启动。";
+    setConnection(false, true);
+    return true;
+  }
+}
+
+async function initializeDatabase(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = $("#setup-submit");
+  const data = Object.fromEntries(new FormData(form));
+  $("#setup-error").textContent = "";
+  submit.disabled = true;
+  submit.textContent = "正在检查并初始化…";
+  try {
+    const result = await api("/setup/database", {
+      method: "POST",
+      body: JSON.stringify({
+        host: data.host,
+        port: Number(data.port),
+        username: data.username,
+        password: data.password,
+        setup_token: data.setup_token,
+      }),
+    }, false);
+    form.reset();
+    form.classList.add("hidden");
+    $("#setup-result").classList.remove("hidden");
+    $("#setup-result-summary").textContent = result.database_created
+      ? "已创建固定数据库 fitness，并完成全部初始化。"
+      : `已识别现有数据库 fitness（初始化前 ${result.existing_table_count} 张表），并完成兼容升级。`;
+    $("#setup-mysql-version").textContent = result.mysql_version || "—";
+    $("#setup-collation").textContent = result.database_collation || "—";
+    $("#setup-table-count").textContent = `${result.table_count} 张`;
+    $("#setup-revision").textContent = result.alembic_revision || "—";
+    $("#setup-seed-status").textContent = result.seed_status === "created" ? "已写入" : "已存在";
+    setConnection(true);
+  } catch (error) {
+    form.elements.password.value = "";
+    form.elements.setup_token.value = "";
+    $("#setup-error").textContent = setupErrorMessage(error);
+    setConnection(false, true);
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "检查并初始化数据库";
+  }
 }
 
 async function loadSession() {
@@ -485,6 +580,12 @@ async function assignSelectedPlan() {
 }
 
 function wireEvents() {
+  $("#setup-form").addEventListener("submit", initializeDatabase);
+  $("#setup-continue").addEventListener("click", async () => {
+    showAuth();
+    switchAuthTab("login");
+    await loadRegistrationStatus();
+  });
   $$("[data-auth-tab]").forEach((button) => button.addEventListener("click", () => switchAuthTab(button.dataset.authTab)));
   $("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -538,6 +639,8 @@ function wireEvents() {
 
 async function start() {
   wireEvents();
+  if (await loadSetupStatus()) return;
+  showAuth();
   if (!state.accessToken) {
     switchAuthTab("login");
     await loadRegistrationStatus();

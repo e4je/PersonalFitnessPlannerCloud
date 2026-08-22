@@ -30,7 +30,7 @@
 - 推荐运行时读取计划的 weekly target、minimum rest days、fatigue threshold 与 adaptation 规则；共享向量已参数化。
 - Room v2、WorkManager、Keystore AES-GCM、HTTPS/Release 日志边界保持不变。
 
-验证边界：本轮 JDK 21 下 main/test 源码编译阶段通过，但 Gradle test worker 未成功启动，因此 Android 最终 JVM/lint/assemble 必须在后续统一构建重跑。
+验证边界：当前统一源码已在 JDK 21、SDK 36 和 ASCII junction 路径下通过 Debug/Release JVM tests（各 79 项）及 lint（0 error）；assemble 与真机测试仍由发布/CI 门禁确认。
 
 ## Windows 当前统一状态
 
@@ -43,7 +43,7 @@
 - 无 assignment 的首次用户使用稳定本地 fallback assignment，不向服务端伪造 assignment。
 - JWT subject 与本地 `account_subject` 绑定；A→B 若有 pending Outbox/本地草稿会 fail-closed，无 pending 时事务清旧健康缓存和全部 cursor。未登录或认证变化会同步清空/重载五个业务 ViewModel，避免内存 UI 泄露。
 
-验证：当前统一源码通过 xUnit 89/89 和 WPF build 0 warning/0 error；Release publish/EXE smoke 仍留待统一构建。
+验证：当前统一源码通过 xUnit 91/91；Release publish/EXE smoke 仍由发布门禁确认。
 
 ## Backend 当前统一状态
 
@@ -52,10 +52,10 @@
 - 普通 change feed 不下发 draft 或无权 private plan；workout create/patch/sync 共用 assignment/version/day/slot/option/exercise/equipment 授权与同树校验。
 - bootstrap 返回全部 active workout/readiness/cardio，不再截断 20/14 条；retention gap 的 `full_resync_required` 可由新版两端正确消费。
 - `scripts/create_user.py` 幂等创建普通用户并自动分配 canonical published plan；不会静默轮换已有密码。
-- 默认/占位生产密钥已移除并 fail-closed；根 `.env` 使用与当前工作目录无关的安全探测，浅层 `/app` 容器路径不会越界。
+- 已配置部署继续拒绝缺失/占位生产密钥；完全无配置时进入一次性码保护的首次 Web 向导，固定创建/识别 `fitness`、自动迁移与 seed，并把连接/JWT 原子保存到私有运行 volume。
 - recommendation/progression 纯规则服务和共享向量测试已接入；无 assignment fallback 的 adaptation week 从首次持久训练推导。
 
-统一副本快速 pytest：72 passed / 1 real-MySQL test deselected。真实 MySQL、Docker 与完整 E2E 留待统一构建。
+统一副本快速 pytest：96 passed / 1 real-MySQL test deselected。真实 MySQL、Docker 与完整 E2E 留待 CI/部署验证。
 
 ## 已知但不阻断源码整合的限制
 

@@ -19,6 +19,8 @@ _PLACEHOLDER_TOKENS = (
 )
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
+APPLICATION_DATABASE_NAME = "fitness"
+RUNTIME_CONFIG_VERSION = 1
 
 
 def _discover_env_files(backend_root: Path) -> tuple[str, ...]:
@@ -33,6 +35,62 @@ def _discover_env_files(backend_root: Path) -> tuple[str, ...]:
 
 
 _ENV_FILES = _discover_env_files(_BACKEND_ROOT)
+
+
+def _load_runtime_config(path: Path) -> dict[str, object] | None:
+    """Load the private first-run configuration, failing closed if it is damaged."""
+
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        database = payload["database"]
+        if not isinstance(payload, dict) or payload.get("version") != RUNTIME_CONFIG_VERSION:
+            raise ValueError("unsupported runtime configuration version")
+        if not isinstance(database, dict):
+            raise ValueError("database configuration must be an object")
+        host = database["host"]
+        port = database["port"]
+        username = database["username"]
+        password = database["password"]
+        database_name = database["name"]
+        jwt_secret = payload["jwt_secret"]
+        if not isinstance(host, str) or not host.strip():
+            raise ValueError("database host is invalid")
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("database port is invalid")
+        if not isinstance(username, str) or not username.strip():
+            raise ValueError("database username is invalid")
+        if not isinstance(password, str) or not password:
+            raise ValueError("database password is invalid")
+        if database_name != APPLICATION_DATABASE_NAME:
+            raise ValueError("database name does not match the application database")
+        if not isinstance(jwt_secret, str) or len(jwt_secret) < 32:
+            raise ValueError("JWT secret is invalid")
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Invalid private runtime configuration: {path}") from exc
+    return payload
+
+
+def build_mysql_database_url(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    database: str = APPLICATION_DATABASE_NAME,
+) -> str:
+    """Build a safely escaped PyMySQL URL from discrete trusted fields."""
+
+    return URL.create(
+        drivername="mysql+pymysql",
+        username=username,
+        password=password,
+        host=host,
+        port=port,
+        database=database,
+        query={"charset": "utf8mb4"},
+    ).render_as_string(hide_password=False)
 
 
 def _load_version_contract() -> dict[str, str]:
@@ -79,15 +137,15 @@ class Settings(BaseSettings):
     # DATABASE_URL is an optional escape hatch for managed databases and tests.
     # When it is empty, build it from discrete fields so reserved characters in
     # MYSQL_PASSWORD are percent-encoded instead of being parsed as URL syntax.
-    database_url: str = ""
+    database_url: str = Field(default="", repr=False)
     mysql_host: str = "127.0.0.1"
     mysql_port: int = Field(default=3306, ge=1, le=65535)
     mysql_user: str = "fitness"
-    mysql_password: str = ""
-    mysql_database: str = "fitness"
+    mysql_password: str = Field(default="", repr=False)
+    mysql_database: str = APPLICATION_DATABASE_NAME
     sql_echo: bool = False
 
-    jwt_secret: str = ""
+    jwt_secret: str = Field(default="", repr=False)
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = Field(default=15, ge=1, le=1440)
     refresh_token_days: int = Field(default=30, ge=1, le=365)
@@ -101,6 +159,8 @@ class Settings(BaseSettings):
     login_attempts_per_minute: int = Field(default=10, ge=1, le=10_000)
     sync_retention_days: int = Field(default=90, ge=1, le=3_650)
     log_level: str = "INFO"
+    runtime_config_path: Path = _BACKEND_ROOT / ".runtime" / "backend-config.json"
+    setup_token: str = Field(default="", repr=False)
 
     @field_validator("jwt_algorithm", mode="before")
     @classmethod
@@ -129,45 +189,62 @@ class Settings(BaseSettings):
                 "API/schema versions must match contracts/schema-version.json"
             )
         explicit_database_url = self.database_url.strip()
-        if not self.jwt_secret.strip():
-            raise ValueError("JWT_SECRET must be provided explicitly")
-        if not explicit_database_url and not self.mysql_password:
-            raise ValueError(
-                "MYSQL_PASSWORD must be provided when DATABASE_URL is not set"
-            )
-        if not explicit_database_url:
-            self.database_url = URL.create(
-                drivername="mysql+pymysql",
-                username=self.mysql_user,
-                password=self.mysql_password,
+        runtime_config = _load_runtime_config(self.runtime_config_path)
+        if runtime_config is not None and not self.jwt_secret.strip():
+            self.jwt_secret = str(runtime_config["jwt_secret"])
+        if runtime_config is not None and not explicit_database_url and not self.mysql_password:
+            database = runtime_config["database"]
+            assert isinstance(database, dict)  # validated by _load_runtime_config
+            self.mysql_host = str(database["host"])
+            self.mysql_port = int(database["port"])
+            self.mysql_user = str(database["username"])
+            self.mysql_password = str(database["password"])
+            self.mysql_database = APPLICATION_DATABASE_NAME
+
+        explicit_database_url = self.database_url.strip()
+        if not explicit_database_url and self.mysql_password:
+            self.database_url = build_mysql_database_url(
                 host=self.mysql_host,
                 port=self.mysql_port,
+                username=self.mysql_user,
+                password=self.mysql_password,
                 database=self.mysql_database,
-                query={"charset": "utf8mb4"},
-            ).render_as_string(hide_password=False)
+            )
+        elif not explicit_database_url:
+            # An empty URL is the supported first-run state. The process can
+            # serve liveness, the Web wizard and setup endpoints without MySQL.
+            self.database_url = ""
+
+        database_configured = bool(self.database_url.strip())
+        if database_configured and not self.jwt_secret.strip():
+            raise ValueError("JWT_SECRET must be provided when the database is configured")
         if self.environment == "production":
-            if len(self.jwt_secret) < 32 or _is_placeholder(self.jwt_secret):
-                raise ValueError("JWT_SECRET must be a strong, non-default value in production")
-            database_password = (
-                make_url(explicit_database_url).password
-                if explicit_database_url
-                else self.mysql_password
-            )
-            database_username = (
-                make_url(explicit_database_url).username
-                if explicit_database_url
-                else self.mysql_user
-            )
-            if database_password is None or _is_placeholder(
-                database_password,
-                username=database_username,
+            if self.jwt_secret and (
+                len(self.jwt_secret) < 32 or _is_placeholder(self.jwt_secret)
             ):
-                raise ValueError(
-                    "The application database password must be a non-placeholder value in production"
-                )
+                raise ValueError("JWT_SECRET must be a strong, non-default value in production")
+            if database_configured:
+                configured_url = make_url(self.database_url)
+                database_password = configured_url.password
+                database_username = configured_url.username
+                if database_password is None or _is_placeholder(
+                    database_password,
+                    username=database_username,
+                ):
+                    raise ValueError(
+                        "The application database password must be a non-placeholder value in production"
+                    )
+            if self.setup_token and (
+                len(self.setup_token) < 24 or _is_placeholder(self.setup_token)
+            ):
+                raise ValueError("SETUP_TOKEN must be strong when provided in production")
             if "*" in self.cors_origins:
                 raise ValueError("Wildcard CORS is forbidden in production")
         return self
+
+    @property
+    def database_configured(self) -> bool:
+        return bool(self.database_url.strip())
 
 
 @lru_cache

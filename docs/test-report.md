@@ -1,6 +1,6 @@
 # 测试与校验报告
 
-日期：2026-08-13。本文只把在统一源码上实际执行过的检查标记为通过。
+日期：2026-08-23。本文只把在统一源码上实际执行过的检查标记为通过。
 
 ## 本轮实际执行
 
@@ -12,12 +12,12 @@
 | OpenAPI 快照 | 通过 | backend 运行时导出与根 `contracts/openapi.yaml` 一致 |
 | Secret scan | 通过 | 未发现提交的密钥、令牌、私钥或 `.env` |
 | 根 PowerShell / POSIX 脚本语法 | 通过 | PowerShell parser 与 `bash -n` |
-| Backend pytest | **72 passed / 1 deselected** | deselected 为未在本地运行的真实 MySQL 8 标记测试 |
+| Backend pytest | **96 passed / 1 deselected** | deselected 为未在本地运行的真实 MySQL 8 标记测试；含首次向导、固定库名、凭据不回显、并发锁与配置持久化回归 |
 | Python 生产依赖审计 | 通过 | 对带 hash 的 `requirements.lock` 执行 `pip-audit --strict --require-hashes --disable-pip`，未发现已知漏洞 |
-| Windows xUnit / WPF build | **89/89；0 warning / 0 error** | 最终统一源码；包括 API 错误脱敏、日志保留、origin、导入/导出与 SQLite 运行时门禁 |
+| Windows xUnit | **91/91** | Release 配置；包括 API 错误脱敏、日志保留、origin、导入/导出与 SQLite 运行时门禁 |
 | Windows NuGet 审计 | 通过 | 直接与传递依赖未发现已知漏洞；high/critical 告警已设为还原错误 |
-| Android 编译/测试 | 部分执行 | JDK 21 下 main/test 源码编译阶段通过；Gradle test worker 因中文分发路径未启动，ASCII 路径重试又被桌面用量限制拒绝，不能记为测试通过 |
-| 源码树清洁度 | 通过 | 0 个 `build/bin/obj/.gradle/.kotlin/.venv/.packages/TestResults`，0 个 APK/EXE/本机配置 |
+| Android 编译/测试 | 通过 | JDK 21 + SDK 36 + ASCII junction；Debug/Release JVM tests 各 79 项，0 失败/0 跳过；lint 0 error、17 warning |
+| 源码树清洁度 | 通过 | 生成目录与本机配置均受 `.gitignore` 约束，`git status` 未出现 APK/EXE、密钥或构建输出 |
 
 Backend 测试使用原始交付的隔离 Python 虚拟环境作为依赖解释器，但工作目录和被测代码均为统一副本 `services/backend`。
 

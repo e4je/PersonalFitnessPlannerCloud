@@ -5,19 +5,25 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import admin, auth, bootstrap, cardio, catalog, health, plans, readiness, recommendation, sync, workouts
+from app.api import admin, auth, bootstrap, cardio, catalog, health, plans, readiness, recommendation, setup, sync, workouts
 from app.core.config import settings
+from app.core.errors import request_validation_exception_handler
 from app.core.logging import configure_logging
-from app.core.middleware import ProductionHTTPSMiddleware, RequestContextMiddleware
+from app.core.middleware import ProductionHTTPSMiddleware, RequestContextMiddleware, SetupRequiredMiddleware
+from app.db.session import is_database_configured
+from app.services.first_run_setup import announce_first_run_setup
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
+    if not is_database_configured():
+        announce_first_run_setup()
     yield
 
 
@@ -38,7 +44,9 @@ app = FastAPI(
     redoc_url=None if settings.environment == "production" else "/redoc",
     openapi_url=None if settings.environment == "production" else "/openapi.json",
 )
+app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
 
+app.add_middleware(SetupRequiredMiddleware)
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +62,7 @@ if settings.environment == "production":
     app.add_middleware(ProductionHTTPSMiddleware)
 
 app.include_router(health.router)
+app.include_router(setup.router, prefix=settings.api_v1_prefix)
 for api_router in (
     auth.router,
     bootstrap.router,

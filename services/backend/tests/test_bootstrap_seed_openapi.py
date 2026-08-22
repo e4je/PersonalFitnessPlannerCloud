@@ -343,6 +343,8 @@ def test_openapi_contains_required_contract_and_auth_scheme(client: TestClient) 
     document = response.json()
 
     required_paths = {
+        "/api/v1/setup/status",
+        "/api/v1/setup/database",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
         "/api/v1/auth/logout",

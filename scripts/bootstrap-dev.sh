@@ -55,5 +55,5 @@ do
 done
 "$venv_python" "$repo_root/scripts/validate_contracts.py"
 
-docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" up -d --build
-docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" ps
+docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" --profile bundled-db up -d --build
+docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" --profile bundled-db ps

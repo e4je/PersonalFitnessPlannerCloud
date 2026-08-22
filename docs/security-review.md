@@ -1,10 +1,10 @@
 # 安全审计
 
-审计日期：2026-08-13。范围为三端统一源码、配置、迁移、构建脚本和旧交付报告；没有对生产环境、真实用户数据或生产 TLS/WAF 做渗透测试。
+审计日期：2026-08-23。范围为三端统一源码、配置、迁移、构建脚本和旧交付报告；没有对生产环境、真实用户数据或生产 TLS/WAF 做渗透测试。
 
 ## 结论
 
-统一仓库没有迁入 APK/EXE、数据库、备份、`.env`、签名材料或真实令牌。客户端没有 MySQL 直连能力；云端目录和数据只通过 REST API。根 Compose 不发布 MySQL 端口，且要求外部注入 MySQL/JWT 密钥；本地 bootstrap 用密码学随机数生成未提交的 `.env`。
+统一仓库没有迁入 APK/EXE、数据库、备份、`.env`、签名材料或真实令牌。客户端没有 MySQL 直连能力；云端目录和数据只通过 REST API。根 Compose 不发布 MySQL 端口；本地 bootstrap 可生成未提交的随机密钥。无配置 backend 会进入一次性码保护的首次向导，完成后把数据库凭据和自动生成的 JWT 密钥写入仅服务账号可读的私有 volume。
 
 本轮已修复主要的授权、同步、请求边界与客户端数据处理问题：未发布/无权计划不再进入普通 change feed，workout 引用必须属于当前用户和同一计划树；backend 按实际 ASGI 字节限制请求体，并用数据库行锁串行化健康记录的版本检查与写入；客户端换 API origin 或刷新失败后不再继续持有令牌，CSV 公式与 Windows 导入边界也已收紧。
 
@@ -15,14 +15,16 @@
 | 检查项 | 结果与处理 | 验证状态 |
 |---|---|---|
 | APK/EXE 内 MySQL 密码 | Android/Windows 源码不含 MySQL 驱动、连接串或密码；旧二进制不进入统一源码 | 源码扫描通过；新二进制待构建扫描 |
-| 硬编码 JWT 密钥 | 根 Compose 使用 `${JWT_SECRET:?...}`；bootstrap 随机生成；backend 所有环境都要求显式密钥，production 额外拒绝弱值/占位符 | secret scan 与 pytest 通过；生产部署待验证 |
+| 硬编码 JWT 密钥 | 已配置部署继续接受 Secret Manager/环境注入；首次向导用密码学随机数生成并保存到私有运行配置；production 拒绝显式弱值/占位符 | secret scan 与 pytest 通过；生产部署待验证 |
+| 首次实例抢占 | Setup POST 需要启动日志中的高熵一次性码、按来源限速并加初始化锁；完成后匿名写接口返回 409；生产流量强制 HTTPS | 快速回归通过；反向代理/TLS 待部署验证 |
 | `.env` 提交 | 根 `.gitignore` 忽略所有 `.env*`，只放行空值 `.env.example` | 通过 |
 | 信任所有证书 | Android 使用平台 TLS 且禁止明文；Windows 仅 loopback 可 HTTP，未发现自定义 trust-all | 通过 |
 | 敏感日志 | backend 有敏感 key 脱敏；Android Release 无 HTTP logging；Windows 不再回显任意 API 错误正文，只提取限长、过滤后的直接错误字段，文件日志按 14 天尽力清理 | 源码与 Windows 回归通过；日志文件本身仍为明文 |
+| 校验错误反射 | backend 的 422 仍返回字段位置和错误原因，但统一移除原始 `input`，避免错误类型的密码、令牌或健康数据被响应反射 | 后端回归通过 |
 | 明文 Refresh Token | Android Keystore AES-GCM；Windows DPAPI CurrentUser；backend 只存 HMAC 摘要并轮换/撤销 | 通过（源码） |
 | 未授权管理 API | backend 逐请求读取数据库 RBAC，不只信客户端/JWT UI；Windows 本地 admin UI 不是安全边界 | 后端测试已有；真实 E2E 待验证 |
 | IDOR | workout assignment/version/day/slot/option/exercise/equipment 校验当前用户授权和同一计划树；同步按 user/计划可见性过滤 | 快速回归通过；真实 MySQL/E2E 待验证 |
-| SQL 注入 | SQLAlchemy 和 SQLite 命令使用参数化；未发现 UI 拼接 SQL | 通过（静态） |
+| SQL 注入 | SQLAlchemy 和 SQLite 命令使用参数化；首次创建的标识符是源码常量 `fitness`，API 不接受库名 | 通过（静态） |
 | CORS | production 禁止 wildcard，来源由环境变量白名单注入 | 通过（源码） |
 | MySQL 公网暴露 | Compose 仅 `expose: 3306` 到内部网络，无 host `ports` | 通过 |
 | 弱管理员密码 | 没有默认管理员；创建脚本交互/环境注入密码，不写长期容器配置 | 流程通过；组织密码策略待部署 |

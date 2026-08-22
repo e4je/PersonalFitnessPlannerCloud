@@ -14,6 +14,7 @@
 - 增量同步游标、保留窗口、过旧游标 `full_resync_required`、Android/Windows 批次兼容。普通用户仅同步本人记录/分配、全局目录，以及系统、本人拥有或有效分配的已发布计划版本；逻辑计划和草稿仅管理员可见。
 - 结构化 JSON 日志、CORS 白名单、按实际 ASGI 字节执行的请求体大小限制、登录限速、无配置泄露的健康检查。
 - 同源 Web 控制台（`/web/`）：普通用户注册/登录和云端概览；管理员账号、角色、停用/密码重置、用户训练概览、注册开关及计划草稿/发布/分配。
+- 无数据库配置也可启动；首次 Web 向导用一次性初始化码连接 MySQL，创建/识别固定 `fitness` 库，自动迁移、seed 并持久化私有运行配置。
 - 完整 OpenAPI、首个迁移、默认 A/B 计划 seed、Docker Compose、测试与 smoke 脚本。
 
 ## 目录
@@ -32,19 +33,44 @@ backend/
 └─ .env.example
 ```
 
-## 快速启动（推荐）
+## 快速启动
 
-要求：Docker Engine 与 Compose 插件可用。MySQL 不需要在 Windows 安装成服务。
+要求：Docker Engine 与 Compose 插件可用。
+
+### 已有 MySQL：首次 Web 向导
+
+不需要先创建 `.env`。只启动 backend（内置 MySQL 位于 `bundled-db` profile，不会被默认启动）：
+
+```bash
+docker compose up -d --build backend
+docker compose logs backend
+```
+
+打开 `http://127.0.0.1:8000/web/`，填写后端容器可访问的 MySQL 8 地址、端口、账号、密码和日志中的一次性 `setup_token`。远程服务器必须先通过可信 HTTPS 反向代理访问 Web，再提交凭据。
+
+初始化流程固定使用数据库名 `fitness`，不接收自定义库名：
+
+1. 查询 MySQL 版本、排序规则和现有表数。
+2. 库不存在时创建 `fitness`；存在时直接读取并兼容升级。
+3. 执行 Alembic 到 head，幂等写入默认计划、系统角色和注册开关。
+4. 将连接信息与自动生成的 JWT 密钥保存到 `/app-data/backend-config.json`；官方 Compose 用 `backend_config` 私有 volume 持久化。
+5. 初始化成功后匿名写接口永久关闭，页面进入注册/登录。
+
+初始化账号需要有创建库（库不存在时）、DDL 和业务表读写权限。密码、连接串和 JWT 不会出现在 HTTP 响应或普通请求日志中。`/health/live` 在向导阶段为 200，`/health/ready` 返回 503 `setup_required`；配置完成后 ready 才变为 200。
+
+### 仓库内置 MySQL
+
+内置 MySQL 不需要在 Windows 安装成服务。先生成/填写密钥并显式启用 profile：
 
 ```bash
 cp .env.example .env
 # 编辑 .env，至少更换 MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD、JWT_SECRET。
-docker compose up -d --build
+docker compose --profile bundled-db up -d --build
 docker compose ps
 python -m scripts.smoke_test
 ```
 
-启动顺序由容器入口自动执行：`alembic upgrade head` → 幂等 seed → Gunicorn/Uvicorn。官方镜像默认使用一个 Gunicorn worker，使进程内登录限速在默认单容器部署中保持一致；多容器/多实例仍需共享限流。MySQL 仅在 Compose 内部网络暴露 3306；后端默认只绑定宿主机 `127.0.0.1:8000`。管理员需在服务健康后按下文执行一次性创建命令。
+已提供数据库配置时，容器入口仍自动执行：`alembic upgrade head` → 幂等 seed → Gunicorn/Uvicorn；没有配置时跳过前两项并进入向导。官方镜像默认使用一个 Gunicorn worker，使首次初始化锁和进程内限速在默认单容器部署中保持一致。首次配置期间不要启动多个 backend 容器；横向扩容后仍需共享限流。MySQL 仅在 Compose 内部网络暴露 3306；后端默认只绑定宿主机 `127.0.0.1:8000`。管理员需在服务就绪后按下文执行一次性创建命令。
 
 ## 本地 Python 开发
 
@@ -53,6 +79,8 @@ cd PersonalFitnessPlannerCloud\services\backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 # 推荐先在仓库根运行 scripts\bootstrap-dev.ps1 -NoStart，它会生成根 .env。
+# 若 Python 在宿主机运行而 MySQL 不在 Compose 网络，先把 MYSQL_HOST
+# 改成宿主机可访问的地址（例如 127.0.0.1）。
 .\.venv\Scripts\alembic.exe upgrade head
 .\.venv\Scripts\python.exe -m scripts.seed_default_plan
 .\.venv\Scripts\uvicorn.exe app.main:app --reload
@@ -101,6 +129,7 @@ unset USER_PASSWORD
 认证与初始化：
 
 ```text
+GET  /api/v1/setup/status     POST /api/v1/setup/database
 POST /api/v1/auth/login       POST /api/v1/auth/refresh
 POST /api/v1/auth/logout      GET  /api/v1/me
 GET  /api/v1/bootstrap        GET  /api/v1/recommendation/today
@@ -121,7 +150,7 @@ GET /api/v1/sync/changes              POST   /api/v1/sync/batch
 
 ### Web 控制台
 
-部署后打开 `https://<你的域名>/web/`。页面与 API 同源，不保存数据库凭据；浏览器只在 `sessionStorage` 保存短期 Bearer/Refresh Token，所有管理员操作仍由服务端实时 RBAC 校验。首次部署后建议先用 `scripts.create_admin` 创建超级管理员，再登录 Web 控制台维护其他账号。
+部署后打开 `https://<你的域名>/web/`。未配置时页面只把数据库凭据提交给同源 Setup API，提交结束立即清空，不写浏览器存储；正常登录后只在 `sessionStorage` 保存本次会话的 Bearer/Refresh Token。所有管理员操作仍由服务端实时 RBAC 校验。数据库初始化后建议先用 `scripts.create_admin` 创建超级管理员，再登录 Web 控制台维护其他账号。
 
 新增接口包括：
 
@@ -160,7 +189,7 @@ TEST_DATABASE_URL='mysql+pymysql://fitness:password@mysql:3306/fitness_test' pyt
 alembic upgrade head
 python -m scripts.seed_default_plan
 python -m scripts.export_openapi
-docker compose up -d --build
+docker compose --profile bundled-db up -d --build
 python -m scripts.smoke_test
 ```
 
@@ -171,13 +200,13 @@ python -m scripts.smoke_test
 先创建只允许运维账号访问的 `backups/`。备份使用一致性事务：
 
 ```bash
-docker compose --profile tools run --rm -T backup > backups/fitness-$(date +%F-%H%M%S).sql
+docker compose --profile bundled-db --profile tools run --rm -T backup > backups/fitness-$(date +%F-%H%M%S).sql
 ```
 
 恢复会覆盖/合并目标库中的对象，必须先核对目标环境并保留旧备份：
 
 ```bash
-docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
+docker compose --profile bundled-db exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" fitness' \
   < backups/fitness-YYYY-MM-DD-HHMMSS.sql
 alembic current
 ```
@@ -187,6 +216,8 @@ alembic current
 ## 生产部署检查
 
 - 设置 `ENVIRONMENT=production`、强随机 `JWT_SECRET`、真实 CORS 白名单与 TLS 终止代理。
+- 首次向导只运行一个 backend 实例；从日志安全获取一次性初始化码，完成后确认 `POST /api/v1/setup/database` 已返回 409。
+- 保护 `backend_config` volume：其中包含数据库密码和 JWT 密钥，不得打包进镜像、备份到公开位置或挂载给其他容器。
 - 不发布 MySQL 端口；数据库账号采用最小权限；密钥由 Secret Manager 注入，不写 `.env` 或镜像。
 - 先备份，再运行 Alembic；滚动发布前验证 `/health/ready` 与 OpenAPI 兼容性。
 - 在网关补充全局登录限速、WAF、请求大小和 TLS 策略；默认容器虽为单 worker，应用内限速仍只是当前进程的防护。

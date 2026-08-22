@@ -38,6 +38,44 @@ paths:
                   type: string
                 type: object
                 title: Response Readiness Health Ready Get
+  /api/v1/setup/status:
+    get:
+      tags:
+      - first-run setup
+      summary: Setup Status
+      operationId: setup_status_api_v1_setup_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupStatusResponse'
+  /api/v1/setup/database:
+    post:
+      tags:
+      - first-run setup
+      summary: Setup Database
+      operationId: setup_database_api_v1_setup_database_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatabaseSetupRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseSetupResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/auth/registration-status:
     get:
       tags:
@@ -2227,6 +2265,93 @@ components:
       - local_date
       - started_at
       title: CardioSessionUpsert
+    DatabaseSetupRequest:
+      properties:
+        host:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Host
+          examples:
+          - mysql
+        port:
+          type: integer
+          maximum: 65535.0
+          minimum: 1.0
+          title: Port
+          default: 3306
+        username:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Username
+          examples:
+          - fitness
+        password:
+          type: string
+          format: password
+          title: Password
+          writeOnly: true
+        setup_token:
+          type: string
+          format: password
+          title: Setup Token
+          writeOnly: true
+      additionalProperties: false
+      type: object
+      required:
+      - host
+      - username
+      - password
+      - setup_token
+      title: DatabaseSetupRequest
+    DatabaseSetupResponse:
+      properties:
+        configured:
+          type: boolean
+          title: Configured
+          default: true
+        setup_required:
+          type: boolean
+          title: Setup Required
+          default: false
+        database_name:
+          type: string
+          title: Database Name
+          default: fitness
+        database_created:
+          type: boolean
+          title: Database Created
+        mysql_version:
+          type: string
+          title: Mysql Version
+        database_collation:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Database Collation
+        existing_table_count:
+          type: integer
+          title: Existing Table Count
+        table_count:
+          type: integer
+          title: Table Count
+        alembic_revision:
+          type: string
+          title: Alembic Revision
+        seed_status:
+          type: string
+          title: Seed Status
+      type: object
+      required:
+      - database_created
+      - mysql_version
+      - database_collation
+      - existing_table_count
+      - table_count
+      - alembic_revision
+      - seed_status
+      title: DatabaseSetupResponse
     EquipmentCreate:
       properties:
         id:
@@ -4096,6 +4221,39 @@ components:
       required:
       - enabled
       title: RegistrationStatusResponse
+    SetupStatusResponse:
+      properties:
+        configured:
+          type: boolean
+          title: Configured
+        setup_required:
+          type: boolean
+          title: Setup Required
+        database_name:
+          type: string
+          title: Database Name
+          default: fitness
+        token_required:
+          type: boolean
+          title: Token Required
+        default_host:
+          type: string
+          title: Default Host
+        default_port:
+          type: integer
+          title: Default Port
+        default_username:
+          type: string
+          title: Default Username
+      type: object
+      required:
+      - configured
+      - setup_required
+      - token_required
+      - default_host
+      - default_port
+      - default_username
+      title: SetupStatusResponse
     SyncBatchIn:
       properties:
         batch_id:

@@ -4,7 +4,8 @@ FROM python:3.12.10-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PATH="/home/app/.local/bin:${PATH}"
+    PATH="/home/app/.local/bin:${PATH}" \
+    RUNTIME_CONFIG_PATH="/app-data/backend-config.json"
 
 ARG PIP_INDEX_URL=https://pypi.org/simple
 WORKDIR /app
@@ -21,11 +22,13 @@ COPY contracts ./contracts
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 RUN addgroup --system app && adduser --system --ingroup app --home /home/app app \
+    && mkdir -p /app-data \
     && chmod +x /app/docker-entrypoint.sh \
-    && chown -R app:app /app /home/app
+    && chown -R app:app /app /app-data /home/app
 
 USER app
 EXPOSE 8000
+VOLUME ["/app-data"]
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["gunicorn", "app.main:app", "--bind", "0.0.0.0:8000", "--workers", "1", "--worker-class", "uvicorn.workers.UvicornWorker", "--access-logfile", "-", "--error-logfile", "-"]

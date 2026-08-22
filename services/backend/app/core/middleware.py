@@ -11,9 +11,53 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import settings
+from app.db.session import is_database_configured
 
 
 logger = logging.getLogger("app.request")
+
+
+class SetupRequiredMiddleware:
+    """Keep the Web wizard reachable while the business API has no database."""
+
+    _allowed_exact_paths = frozenset(
+        {
+            "/",
+            "/health/live",
+            "/health/ready",
+            "/api/v1/setup/status",
+            "/api/v1/setup/database",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+        }
+    )
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    @classmethod
+    def _allowed(cls, path: str) -> bool:
+        return path in cls._allowed_exact_paths or path == "/web" or path.startswith("/web/")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope.get("method") != "OPTIONS"
+            and not is_database_configured()
+            and not self._allowed(str(scope.get("path", "")))
+        ):
+            await JSONResponse(
+                status_code=503,
+                content={
+                    "detail": {
+                        "code": "setup_required",
+                        "message": "Complete database setup in /web/ before using the API",
+                    }
+                },
+            )(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 class ProductionHTTPSMiddleware:

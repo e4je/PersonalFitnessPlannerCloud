@@ -64,25 +64,35 @@ tag 会触发同一套 CI，但不会自动创建 GitHub Release，也不会自�
 
 ## 本地启动云同步服务
 
-需要 Docker Engine 和 Docker Compose。首次启动会在本地生成不提交到 Git 的 `.env`，其中包含随机数据库密码和 JWT 密钥：
+需要 Docker Engine 和 Docker Compose。仓库内置 MySQL 的最省事启动方式是运行下面的脚本；它会生成不提交到 Git 的 `.env`，写入随机数据库密码和 JWT 密钥，并启用 `bundled-db` profile：
 
 ```powershell
 .\scripts\bootstrap-dev.ps1
 ```
 
-也可以手动复制 `.env.example`，填写必要配置后启动：
+也可以手动复制 `.env.example`，填写必要配置后启动内置 MySQL：
 
 ```powershell
-docker compose --env-file .env -f infra/docker-compose.yml up -d --build
+docker compose --env-file .env -f infra/docker-compose.yml --profile bundled-db up -d --build
 ```
+
+如果已有 MySQL 8，也可以不配置数据库变量，先只启动后端：
+
+```powershell
+docker compose -f infra/docker-compose.yml up -d --build backend
+docker compose -f infra/docker-compose.yml logs backend
+```
+
+然后打开 `http://127.0.0.1:8000/web/`。首次启动页面会要求填写 MySQL 地址、端口、账号、密码，以及日志中的一次性 `setup_token`。数据库名固定为 `fitness`：不存在时后端创建，已存在时读取版本和表信息，再自动运行 Alembic 与默认计划 seed。连接账号需要具备创建 `fitness`（若尚不存在）、升级表结构和读写业务表的权限。远程部署必须先配置 HTTPS，再在页面提交数据库凭据。
 
 默认情况下：
 
 - API 监听 `http://127.0.0.1:8000`。
 - MySQL 只在 Docker 内部网络中开放，不映射到宿主机。
 - 数据保存在 Docker volume `personal_fitness_planner_mysql_data` 中。
+- 首次页面生成的数据库连接与 JWT 密钥保存在 `personal_fitness_planner_backend_config` 私有 volume 中。
 
-部署完成后可打开 `https://<你的域名>/web/` 使用 Web 控制台。首次部署先按后端文档创建超级管理员；管理员可以在“系统设置”关闭公开注册，也可以在“账号管理”创建普通账号、停用账号或重置密码。Web 页面与 API 同源，浏览器不接触 MySQL 凭据。
+部署完成后可打开 `https://<你的域名>/web/` 使用 Web 控制台。首次数据库配置完成后，页面会进入注册/登录；再按后端文档创建超级管理员。管理员可以在“系统设置”关闭公开注册，也可以在“账号管理”创建普通账号、停用账号或重置密码。数据库凭据只在首次设置时通过同源 HTTPS 提交，页面不会保存，Android/Windows 客户端也不会接触这些凭据。
 
 这个 HTTP 地址适合浏览器、接口调试工具和同机运行的 Windows 客户端。Android 客户端只接受 HTTPS，即使是 Debug APK 或 `localhost` 也不会放行明文 HTTP。若要让 Android 连接自建后端，需要在 API 前配置带可信证书的 HTTPS 反向代理，并在应用中填写对应的 HTTPS 地址。
 

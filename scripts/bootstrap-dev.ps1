@@ -10,10 +10,24 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
 $backend = Join-Path $repoRoot "services/backend"
 
+function New-RandomBase64Secret {
+    param([Parameter(Mandatory)][int]$ByteCount)
+
+    $bytes = New-Object byte[] $ByteCount
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    }
+    finally {
+        $generator.Dispose()
+    }
+    return [Convert]::ToBase64String($bytes)
+}
+
 if (-not (Test-Path -LiteralPath $envPath)) {
-    $mysqlPassword = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(36))
-    $rootPassword = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(36))
-    $jwtSecret = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+    $mysqlPassword = New-RandomBase64Secret -ByteCount 36
+    $rootPassword = New-RandomBase64Secret -ByteCount 36
+    $jwtSecret = New-RandomBase64Secret -ByteCount 48
     $content = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".env.example")
     $content = $content -replace "(?m)^MYSQL_PASSWORD=$", "MYSQL_PASSWORD=$mysqlPassword"
     $content = $content -replace "(?m)^MYSQL_ROOT_PASSWORD=$", "MYSQL_ROOT_PASSWORD=$rootPassword"
@@ -41,7 +55,7 @@ if (-not $SkipPythonEnvironment) {
 )
 
 if (-not $NoStart) {
-    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") up -d --build
+    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") --profile bundled-db up -d --build
     if ($LASTEXITCODE -ne 0) { throw "Docker Compose startup failed" }
-    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") ps
+    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") --profile bundled-db ps
 }
