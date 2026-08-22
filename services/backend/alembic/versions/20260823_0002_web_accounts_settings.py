@@ -69,6 +69,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_system_settings_updated_by_user_id", table_name="system_settings")
-    op.drop_index("ix_system_settings_key", table_name="system_settings")
+    # Dropping the table removes its foreign key and both indexes atomically.
+    # MySQL rejects dropping the FK-supporting index while the constraint still
+    # exists (error 1553), so do not issue separate DROP INDEX statements.
     op.drop_table("system_settings")

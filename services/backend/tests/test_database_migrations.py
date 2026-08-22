@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,30 @@ from tests.conftest import validated_mysql_test_url
 
 
 EXPECTED_TABLES = set(Base.metadata.tables)
+
+
+def test_web_settings_downgrade_drops_table_without_fk_index_conflict(
+    backend_root: Path,
+) -> None:
+    migration = runpy.run_path(
+        str(
+            backend_root
+            / "alembic"
+            / "versions"
+            / "20260823_0002_web_accounts_settings.py"
+        )
+    )
+    operations: list[tuple[str, str]] = []
+
+    class RecordingOperations:
+        def drop_table(self, table_name: str) -> None:
+            operations.append(("drop_table", table_name))
+
+    downgrade = migration["downgrade"]
+    downgrade.__globals__["op"] = RecordingOperations()
+    downgrade()
+
+    assert operations == [("drop_table", "system_settings")]
 HEAD_REVISION = "20260823_0002"
 
 

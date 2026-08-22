@@ -55,7 +55,7 @@
 - 已配置部署继续拒绝缺失/占位生产密钥；完全无配置时进入一次性码保护的首次 Web 向导，固定创建/识别 `fitness`、自动迁移与 seed，并把连接/JWT 原子保存到私有运行 volume。
 - recommendation/progression 纯规则服务和共享向量测试已接入；无 assignment fallback 的 adaptation week 从首次持久训练推导。
 
-统一副本快速 pytest：96 passed / 1 real-MySQL test deselected。真实 MySQL、Docker 与完整 E2E 留待 CI/部署验证。
+统一副本快速 pytest：97 passed / 1 real-MySQL test deselected。真实 MySQL、Docker 与完整 E2E 留待 CI/部署验证。
 
 ## 已知但不阻断源码整合的限制
 

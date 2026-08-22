@@ -12,7 +12,7 @@
 | OpenAPI 快照 | 通过 | backend 运行时导出与根 `contracts/openapi.yaml` 一致 |
 | Secret scan | 通过 | 未发现提交的密钥、令牌、私钥或 `.env` |
 | 根 PowerShell / POSIX 脚本语法 | 通过 | PowerShell parser 与 `bash -n` |
-| Backend pytest | **96 passed / 1 deselected** | deselected 为未在本地运行的真实 MySQL 8 标记测试；含首次向导、固定库名、凭据不回显、并发锁与配置持久化回归 |
+| Backend pytest | **97 passed / 1 deselected** | deselected 为未在本地运行的真实 MySQL 8 标记测试；含首次向导、固定库名、凭据不回显、并发锁、配置持久化与 MySQL downgrade 顺序回归 |
 | Python 生产依赖审计 | 通过 | 对带 hash 的 `requirements.lock` 执行 `pip-audit --strict --require-hashes --disable-pip`，未发现已知漏洞 |
 | Windows xUnit | **91/91** | Release 配置；包括 API 错误脱敏、日志保留、origin、导入/导出与 SQLite 运行时门禁 |
 | Windows NuGet 审计 | 通过 | 直接与传递依赖未发现已知漏洞；high/critical 告警已设为还原错误 |
