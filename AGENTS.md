@@ -3,7 +3,7 @@
 ## 仓库结构与职责
 
 - `apps/android/`：Kotlin、Jetpack Compose、Room 客户端。负责移动训练、离线记录、Outbox 和恢复联网同步。
-- `apps/windows/`：.NET 8、WPF、SQLite 客户端。负责桌面训练、计划编辑/发布/分配和管理操作。
+- `apps/windows/`：.NET 10、WPF、SQLite 客户端。负责桌面训练、计划编辑/发布/分配和管理操作。
 - `services/backend/`：FastAPI、SQLAlchemy、Alembic、MySQL 8。负责认证、RBAC、云端权威目录/计划、训练、同步、审计和 OpenAPI。
 - `contracts/`：跨端唯一权威契约。默认计划只能从这里修改。
 - `infra/`：本地/部署基础设施。MySQL 不得发布宿主端口。

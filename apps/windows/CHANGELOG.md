@@ -11,7 +11,7 @@
 - 无服务端 assignment 的首次用户使用稳定、仅本地且不上传的 fallback assignment。
 - 将 SQLite cache/cursor 绑定 JWT subject；账号切换在 pending Outbox/本地草稿时阻断，安全切换时事务清旧账号缓存，并同步清空旧业务 ViewModel。
 - 将 DPAPI token 绑定到规范化 API 源站；旧 token、跨源切换和导入备份修改源站均 fail closed。
-- 将 `Microsoft.Data.Sqlite` 固定至 8.0.29、原生 bundle 固定至 3.0.5，并增加 SQLite 3.50.2 最低运行时门禁；CSV 阻断表格公式执行，JSON 导入增加大小/结构上限且只恢复可移植偏好。
+- 将 Windows 基线迁移到 .NET 10，`Microsoft.Data.Sqlite` 固定至 10.0.11、原生 bundle 固定至 3.0.5，并增加 SQLite 3.50.2 最低运行时门禁；CSV 阻断表格公式执行，JSON 导入增加大小/结构上限且只恢复可移植偏好。
 - API 失败只保留限长且过滤后的安全错误字段，不再把任意响应正文写入异常；应用日志按 14 天尽力清理。
 - 固定更新后的 SQLite 托管/原生依赖，并对直接和传递 NuGet high/critical 漏洞启用还原门禁。
 

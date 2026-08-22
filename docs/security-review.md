@@ -78,7 +78,7 @@
 
 ### 依赖与默认部署基线
 
-- Windows 显式固定 `Microsoft.Data.Sqlite` 8.0.29 与原生 bundle 3.0.5，并用运行时测试阻止原生 SQLite 低于 3.50.2 安全基线；NuGet audit 覆盖传递依赖并把 high/critical 告警视为错误。
+- Windows 统一到 .NET 10，显式固定 `Microsoft.Data.Sqlite` 10.0.11 与原生 bundle 3.0.5，并用运行时测试阻止原生 SQLite 低于 3.50.2 安全基线；NuGet audit 覆盖传递依赖并把 high/critical 告警视为错误。
 - backend CI 对带 hash 的生产 `requirements.lock` 运行 `pip-audit`；Dependabot 为 Gradle、NuGet、pip 和 GitHub Actions 建立每周更新检查。
 - 官方 backend Dockerfile 默认只启动一个 Gunicorn worker，使当前进程内登录限速在默认单容器部署中一致生效。横向扩容为多个容器/实例时仍必须使用网关或 Redis 等共享限流器。
 
