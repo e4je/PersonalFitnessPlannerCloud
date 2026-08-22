@@ -214,6 +214,7 @@ class Settings(BaseSettings):
             # An empty URL is the supported first-run state. The process can
             # serve liveness, the Web wizard and setup endpoints without MySQL.
             self.database_url = ""
+            self.mysql_database = APPLICATION_DATABASE_NAME
 
         database_configured = bool(self.database_url.strip())
         if database_configured and not self.jwt_secret.strip():
