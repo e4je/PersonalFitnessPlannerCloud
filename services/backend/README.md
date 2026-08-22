@@ -13,6 +13,7 @@
 - `Idempotency-Key` 首次响应回放；同键异载荷返回 409。
 - 增量同步游标、保留窗口、过旧游标 `full_resync_required`、Android/Windows 批次兼容。普通用户仅同步本人记录/分配、全局目录，以及系统、本人拥有或有效分配的已发布计划版本；逻辑计划和草稿仅管理员可见。
 - 结构化 JSON 日志、CORS 白名单、按实际 ASGI 字节执行的请求体大小限制、登录限速、无配置泄露的健康检查。
+- 同源 Web 控制台（`/web/`）：普通用户注册/登录和云端概览；管理员账号、角色、停用/密码重置、用户训练概览、注册开关及计划草稿/发布/分配。
 - 完整 OpenAPI、首个迁移、默认 A/B 计划 seed、Docker Compose、测试与 smoke 脚本。
 
 ## 目录
@@ -82,7 +83,7 @@ unset ADMIN_PASSWORD
 
 已有用户会被幂等提升；只有在命令末尾显式传入 `--update-password` 才更新已有密码。创建后不要把 `ADMIN_PASSWORD` 写入 `.env`。
 
-当前没有公开注册接口。普通用户通过同样受控且幂等的命令预置；重复执行默认不会更改已有密码，只有显式增加 `--update-password` 才轮换：
+也可以通过 Web 控制台注册普通账号。管理员可在“系统设置”关闭公开注册；关闭后仍可使用下方受控命令预置普通用户。命令重复执行默认不会更改已有密码，只有显式增加 `--update-password` 才轮换：
 
 ```bash
 read -r -p "User email: " USER_EMAIL
@@ -117,6 +118,24 @@ GET /api/v1/sync/changes              POST   /api/v1/sync/batch
 ```
 
 管理接口位于 `/api/v1/admin`，覆盖动作、器械、逻辑计划、版本、发布、分配、审计日志和同步状态。交互文档位于 `/docs`，固定契约为 `contracts/openapi.yaml`。
+
+### Web 控制台
+
+部署后打开 `https://<你的域名>/web/`。页面与 API 同源，不保存数据库凭据；浏览器只在 `sessionStorage` 保存短期 Bearer/Refresh Token，所有管理员操作仍由服务端实时 RBAC 校验。首次部署后建议先用 `scripts.create_admin` 创建超级管理员，再登录 Web 控制台维护其他账号。
+
+新增接口包括：
+
+```text
+GET/POST /api/v1/auth/registration-status|register
+GET/PATCH /api/v1/admin/settings/registration
+GET/POST /api/v1/admin/users
+PATCH /api/v1/admin/users/{user_id}
+GET /api/v1/admin/users/{user_id}/overview
+GET /api/v1/admin/plans
+GET /api/v1/admin/plan-versions/{version_id}
+```
+
+管理员修改计划必须遵循“创建草稿 → 保存/校验 → 发布 → 分配”；已发布版本不可原地修改。
 
 Android 兼容约定：登录使用 JSON；所有写入使用 `Idempotency-Key`；分页统一返回 `items/cursor/next_cursor/has_more`；计划为 `days → slots → options`；时间为 ISO 8601；训练状态在 wire 层为大写。
 
@@ -181,5 +200,5 @@ alembic current
 - 部分统一错误响应和 admin/recommendation OpenAPI schema 仍需继续收紧；健康记录已用行锁串行化，但兼容期可省略 `expected_version`，真实 MySQL 并发行为仍需专项验证。
 - 登录限速存于进程内；官方镜像默认一个 worker，多容器/多实例的全局限速仍需由 API 网关或 Redis 补充。
 - 发布不可变由服务层和 SQLAlchemy flush 防护实现；绕过应用直接执行 SQL 的高权限账号仍可改库。
-- 当前没有公开注册、密码找回或邮件验证接口；用户生命周期应接入后续身份管理流程。
+- 已提供可由管理员开关控制的公开注册；当前仍没有密码找回或邮件验证接口，个人部署应通过 Web 管理员页面或受控运维命令完成账号生命周期管理。
 - 增量 change feed 已按保留窗口判断失效，但历史清理需要由部署方配置周期任务。

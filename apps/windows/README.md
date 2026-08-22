@@ -46,7 +46,7 @@ dotnet --list-sdks
 .\artifacts\PersonalFitnessPlanner.exe --data-dir "D:\我的数据\健身 规划"
 ```
 
-应用自动执行 SQLite migration。训练写入本地后进入 Outbox；同步使用客户端幂等键和增量游标，首次同步通过 bootstrap 建立缓存，“完整重新同步”会重建服务器权威缓存但保留本地草稿、训练 Outbox 和设置。客户端不直连 MySQL。
+应用自动执行 SQLite migration。训练写入本地后进入 Outbox；同步使用客户端幂等键和增量游标，首次同步通过 bootstrap 建立缓存。设置页可分别“上传本地”（只发送 Outbox）或“云端覆盖”（只下载服务器权威缓存）；覆盖前会检查待上传队列并在有未同步记录时拒绝。客户端不直连 MySQL。
 
 API 地址在“设置 → API 地址”中配置，例如 `https://fitness.example.com/`。生产环境仅应使用 HTTPS。管理能力由登录令牌的角色声明决定，不能通过本地界面开关提升权限。
 

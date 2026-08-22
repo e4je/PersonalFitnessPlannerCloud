@@ -54,6 +54,8 @@ data class ExerciseLibraryCallbacks(
 data class SettingsCallbacks(
     val onSettingChanged: (SettingsKey, String) -> Unit = { _, _ -> },
     val onSync: () -> Unit = {},
+    val onUploadLocal: () -> Unit = {},
+    val onDownloadCloudOverwrite: () -> Unit = {},
     val onExport: (ExportFormat) -> Unit = {},
     val onLocalBackup: () -> Unit = {},
     val onClearCache: () -> Unit = {},
@@ -74,6 +76,8 @@ data class FitnessAppCallbacks(
     val onMarkRest: () -> Unit = {},
     val onSwitchToCardio: () -> Unit = {},
     val onSync: () -> Unit = {},
+    val onUploadLocal: () -> Unit = {},
+    val onDownloadCloudOverwrite: () -> Unit = {},
     val onExerciseStart: (String) -> Unit = {},
     val onExerciseSkip: (String) -> Unit = {},
     val onExerciseSwap: (String) -> Unit = {},

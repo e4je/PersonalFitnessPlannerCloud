@@ -96,6 +96,8 @@ class RoomSyncLocalStore(
         }
     }
 
+    override suspend fun pendingOutboxCount(): Int = database.syncDao().pendingMutationCount()
+
     override suspend fun markOutboxSynced(ids: List<String>) {
         if (ids.isEmpty()) return
         database.withTransaction {

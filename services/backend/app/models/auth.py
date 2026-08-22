@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, SyncEntityMixin, UTCDateTime, utcnow
+from app.db.base import Base, SyncEntityMixin, UTCDateTime, UUIDPrimaryKeyMixin, utcnow
 
 
 class User(SyncEntityMixin, Base):
@@ -135,3 +136,31 @@ class RefreshToken(SyncEntityMixin, Base):
     @property
     def is_revoked(self) -> bool:
         return self.revoked_at is not None
+
+
+class SystemSetting(UUIDPrimaryKeyMixin, Base):
+    """Small, audited operator settings stored outside the sync stream.
+
+    Settings are deliberately not ``SyncEntity`` rows: they describe server
+    policy (for example whether public registration is enabled), not user data
+    that should ever be sent to a client change feed.
+    """
+
+    __tablename__ = "system_settings"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_system_settings_key"),
+        Index("ix_system_settings_key", "key"),
+    )
+
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    updated_by: Mapped[User | None] = relationship("User", foreign_keys=[updated_by_user_id])

@@ -4,7 +4,7 @@ Import this module before using ``Base.metadata`` so every mapped table is
 registered for Alembic, tests, and one-shot development database creation.
 """
 
-from app.models.auth import RefreshToken, Role, User, UserRole
+from app.models.auth import RefreshToken, Role, SystemSetting, User, UserRole
 from app.models.catalog import (
     Equipment,
     Exercise,
@@ -46,6 +46,7 @@ __all__ = [
     "Role",
     "SchemaVersion",
     "SyncChange",
+    "SystemSetting",
     "TrainingPlan",
     "User",
     "UserRole",

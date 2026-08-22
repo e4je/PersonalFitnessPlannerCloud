@@ -25,6 +25,7 @@ from app.models import (
     PlanVersion,
     Role,
     SchemaVersion,
+    SystemSetting,
     SyncChange,
     TrainingPlan,
 )
@@ -108,6 +109,23 @@ def _ensure_roles(db: Session) -> None:
             role.is_system = True
 
 
+def _ensure_system_settings(db: Session) -> None:
+    """Create policy defaults without overwriting an operator's choice."""
+
+    row = db.scalar(
+        select(SystemSetting).where(SystemSetting.key == "registration_enabled")
+    )
+    if row is None:
+        db.add(
+            SystemSetting(
+                id=_stable_id("setting", "registration_enabled"),
+                key="registration_enabled",
+                value_json={"value": True},
+                description="Allow unauthenticated visitors to create standard accounts",
+            )
+        )
+
+
 def _ensure_schema_version(db: Session) -> None:
     row = db.scalar(
         select(SchemaVersion).where(SchemaVersion.schema_version == settings.schema_version)
@@ -140,6 +158,7 @@ def seed_default_plan(db: Session, *, commit: bool = True) -> dict[str, Any]:
     """
 
     _ensure_roles(db)
+    _ensure_system_settings(db)
     _ensure_schema_version(db)
 
     flattened: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []

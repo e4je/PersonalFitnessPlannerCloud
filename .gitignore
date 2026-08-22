@@ -33,6 +33,7 @@ apps/android/build/
 
 # .NET / Visual Studio
 apps/windows/.packages/
+apps/windows/.dotnet-cli/
 apps/windows/**/bin/
 apps/windows/**/obj/
 apps/windows/TestResults/

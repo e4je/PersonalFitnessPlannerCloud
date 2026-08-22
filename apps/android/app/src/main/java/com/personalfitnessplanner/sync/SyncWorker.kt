@@ -44,6 +44,10 @@ class SyncWorker(
                 workDataOf(KEY_ERROR to result.message.take(MAX_OUTPUT_MESSAGE_LENGTH)),
             )
 
+            is SyncResult.LocalChangesPending -> Result.failure(
+                workDataOf(KEY_ERROR to "${result.count} local changes are waiting to be uploaded"),
+            )
+
             SyncResult.AlreadyRunning -> Result.success()
         }
     }

@@ -387,6 +387,8 @@
                                     <Button Content="退出" Command="{Binding Settings.LogoutCommand}" Style="{StaticResource SecondaryButton}" />
                                     <Button Content="同步" Command="{Binding Settings.SyncCommand}" Style="{StaticResource SecondaryButton}" />
                                     <Button Content="完整重新同步" Command="{Binding Settings.FullSyncCommand}" Style="{StaticResource SecondaryButton}" />
+                                    <Button Content="上传本地" Command="{Binding Settings.UploadLocalCommand}" Style="{StaticResource SecondaryButton}" />
+                                    <Button Content="云端覆盖" Command="{Binding Settings.DownloadCloudOverwriteCommand}" Style="{StaticResource SecondaryButton}" />
                                 </StackPanel>
                                 <TextBlock Grid.Row="1" Grid.Column="2" Grid.RowSpan="2" Text="{Binding Settings.AuthenticationText}" Margin="16" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="220" />
                             </Grid>
@@ -413,6 +415,7 @@
                                     <Button Content="导入 JSON…" Click="ImportButton_Click" Style="{StaticResource SecondaryButton}" />
                                 </WrapPanel>
                                 <TextBlock Text="备份最多保留最近 10 份；修改数据目录需重启应用。" Foreground="{DynamicResource MutedBrush}" Margin="4" />
+                                <TextBlock Text="云端覆盖不会先上传本地记录；存在待上传 Outbox 时会自动拒绝，请先上传或备份。" Foreground="{DynamicResource MutedBrush}" Margin="4" TextWrapping="Wrap" />
                             </StackPanel>
                         </GroupBox>
                         <GroupBox Grid.Row="3" Header="版本信息">

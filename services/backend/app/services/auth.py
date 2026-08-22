@@ -63,6 +63,17 @@ class LoginRateLimiter:
             return False, retry_after
 
     def register_failure(self, key: str) -> None:
+        """Record a rejected authentication attempt.
+
+        Kept as a named compatibility wrapper because callers and tests use the
+        more specific terminology for login failures.
+        """
+
+        self.register_attempt(key)
+
+    def register_attempt(self, key: str) -> None:
+        """Record one attempt, regardless of whether it eventually succeeds."""
+
         now = monotonic()
         with self._lock:
             self._evict(now, key)
@@ -126,6 +137,12 @@ def login_rate_key(ip_address: str | None, email: str) -> str:
 
 def login_ip_rate_key(ip_address: str | None) -> str:
     return "ip:" + hashlib.sha256((ip_address or "unknown").encode("utf-8")).hexdigest()
+
+
+def registration_ip_rate_key(ip_address: str | None) -> str:
+    """Return a bounded key for unauthenticated account-creation attempts."""
+
+    return "register-ip:" + hashlib.sha256((ip_address or "unknown").encode("utf-8")).hexdigest()
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:

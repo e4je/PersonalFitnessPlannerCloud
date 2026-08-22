@@ -38,6 +38,45 @@ paths:
                   type: string
                 type: object
                 title: Response Readiness Health Ready Get
+  /api/v1/auth/registration-status:
+    get:
+      tags:
+      - authentication
+      summary: Registration Status
+      description: Expose only the registration policy; never expose account existence.
+      operationId: registration_status_api_v1_auth_registration_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationStatusResponse'
+  /api/v1/auth/register:
+    post:
+      tags:
+      - authentication
+      summary: Register
+      operationId: register_api_v1_auth_register_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/auth/login:
     post:
       tags:
@@ -781,6 +820,324 @@ paths:
                 title: Response Recommendation Today Api V1 Recommendation Today Get
       security:
       - HTTPBearer: []
+  /api/v1/admin/settings/registration:
+    get:
+      tags:
+      - administration
+      summary: Get Registration Setting
+      operationId: get_registration_setting_api_v1_admin_settings_registration_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationSettingResponse'
+      security:
+      - HTTPBearer: []
+    patch:
+      tags:
+      - administration
+      summary: Patch Registration Setting
+      operationId: patch_registration_setting_api_v1_admin_settings_registration_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationSettingPatch'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationSettingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/users:
+    get:
+      tags:
+      - administration
+      summary: List Users
+      operationId: list_users_api_v1_admin_users_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: query
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Query
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - administration
+      summary: Create User
+      operationId: create_user_api_v1_admin_users_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUserCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}:
+    patch:
+      tags:
+      - administration
+      summary: Patch User
+      operationId: patch_user_api_v1_admin_users__user_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUserPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/users/{user_id}/overview:
+    get:
+      tags:
+      - administration
+      summary: User Overview
+      operationId: user_overview_api_v1_admin_users__user_id__overview_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserOverview'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/plans:
+    get:
+      tags:
+      - administration
+      summary: List Admin Plans
+      operationId: list_admin_plans_api_v1_admin_plans_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 16
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminPlanPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - administration
+      summary: Create Plan
+      operationId: create_plan_api_v1_admin_plans_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Create Plan Api V1 Admin Plans Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/plan-versions/{version_id}:
+    get:
+      tags:
+      - administration
+      summary: Get Admin Plan Version
+      operationId: get_admin_plan_version_api_v1_admin_plan_versions__version_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Admin Plan Version Api V1 Admin Plan Versions  Version Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - administration
+      summary: Patch Version
+      operationId: patch_version_api_v1_admin_plan_versions__version_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Version Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanVersionPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Patch Version Api V1 Admin Plan Versions  Version Id  Patch
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/admin/equipment:
     post:
       tags:
@@ -911,35 +1268,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/admin/plans:
-    post:
-      tags:
-      - administration
-      summary: Create Plan
-      operationId: create_plan_api_v1_admin_plans_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PlanCreate'
-        required: true
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                additionalProperties: true
-                type: object
-                title: Response Create Plan Api V1 Admin Plans Post
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-      security:
-      - HTTPBearer: []
   /api/v1/admin/plans/{plan_id}/versions:
     post:
       tags:
@@ -970,42 +1298,6 @@ paths:
                 type: object
                 additionalProperties: true
                 title: Response Create Version Api V1 Admin Plans  Plan Id  Versions Post
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/admin/plan-versions/{version_id}:
-    patch:
-      tags:
-      - administration
-      summary: Patch Version
-      operationId: patch_version_api_v1_admin_plan_versions__version_id__patch
-      security:
-      - HTTPBearer: []
-      parameters:
-      - name: version_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Version Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PlanVersionPatch'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-                title: Response Patch Version Api V1 Admin Plan Versions  Version Id  Patch
         '422':
           description: Validation Error
           content:
@@ -1151,6 +1443,300 @@ paths:
       - HTTPBearer: []
 components:
   schemas:
+    AdminPlanPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/AdminPlanSummary'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      required:
+      - items
+      title: AdminPlanPage
+    AdminPlanSummary:
+      properties:
+        id:
+          type: string
+          title: Id
+        plan_id:
+          type: string
+          title: Plan Id
+        plan_name:
+          type: string
+          title: Plan Name
+        version_number:
+          type: integer
+          title: Version Number
+        status:
+          type: string
+          title: Status
+        version:
+          type: integer
+          title: Version
+        weekly_frequency:
+          type: integer
+          title: Weekly Frequency
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        published_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Published At
+      type: object
+      required:
+      - id
+      - plan_id
+      - plan_name
+      - version_number
+      - status
+      - version
+      - weekly_frequency
+      - updated_at
+      title: AdminPlanSummary
+    AdminUserCreate:
+      properties:
+        email:
+          type: string
+          maxLength: 254
+          minLength: 3
+          title: Email
+        username:
+          type: string
+          maxLength: 64
+          minLength: 3
+          title: Username
+        password:
+          type: string
+          maxLength: 1024
+          minLength: 12
+          title: Password
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        timezone:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Timezone
+          default: Asia/Shanghai
+        weight_unit:
+          type: string
+          enum:
+          - KG
+          - LB
+          title: Weight Unit
+          default: KG
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+      additionalProperties: false
+      type: object
+      required:
+      - email
+      - username
+      - password
+      - display_name
+      title: AdminUserCreate
+    AdminUserOverview:
+      properties:
+        user:
+          $ref: '#/components/schemas/AdminUserResponse'
+        assignments:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Assignments
+        plans:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Plans
+        workout_sessions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Workout Sessions
+        readiness:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Readiness
+        cardio_sessions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Cardio Sessions
+      type: object
+      required:
+      - user
+      title: AdminUserOverview
+    AdminUserPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/AdminUserResponse'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
+      type: object
+      required:
+      - items
+      title: AdminUserPage
+    AdminUserPatch:
+      properties:
+        expected_version:
+          type: integer
+          minimum: 1.0
+          title: Expected Version
+        display_name:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Display Name
+        timezone:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Timezone
+        weight_unit:
+          anyOf:
+          - type: string
+            enum:
+            - KG
+            - LB
+          - type: 'null'
+          title: Weight Unit
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+        password:
+          anyOf:
+          - type: string
+            maxLength: 1024
+            minLength: 12
+          - type: 'null'
+          title: Password
+        roles:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Roles
+      additionalProperties: false
+      type: object
+      required:
+      - expected_version
+      title: AdminUserPatch
+    AdminUserResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        email:
+          type: string
+          title: Email
+        username:
+          type: string
+          title: Username
+        display_name:
+          type: string
+          title: Display Name
+        timezone:
+          type: string
+          title: Timezone
+        weight_unit:
+          type: string
+          title: Weight Unit
+        is_active:
+          type: boolean
+          title: Is Active
+        is_superuser:
+          type: boolean
+          title: Is Superuser
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+        version:
+          type: integer
+          title: Version
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        last_login_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Login At
+      type: object
+      required:
+      - id
+      - email
+      - username
+      - display_name
+      - timezone
+      - weight_unit
+      - is_active
+      - is_superuser
+      - version
+      - created_at
+      - updated_at
+      title: AdminUserResponse
     AssignmentCreate:
       properties:
         id:
@@ -3424,6 +4010,92 @@ components:
       required:
       - refresh_token
       title: RefreshRequest
+    RegisterRequest:
+      properties:
+        email:
+          type: string
+          maxLength: 254
+          minLength: 3
+          title: Email
+        username:
+          type: string
+          maxLength: 64
+          minLength: 3
+          title: Username
+        password:
+          type: string
+          maxLength: 1024
+          minLength: 12
+          title: Password
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        timezone:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Timezone
+          default: Asia/Shanghai
+        weight_unit:
+          type: string
+          enum:
+          - KG
+          - LB
+          title: Weight Unit
+          default: KG
+      additionalProperties: false
+      type: object
+      required:
+      - email
+      - username
+      - password
+      - display_name
+      title: RegisterRequest
+    RegistrationSettingPatch:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+      additionalProperties: false
+      type: object
+      required:
+      - enabled
+      title: RegistrationSettingPatch
+    RegistrationSettingResponse:
+      properties:
+        key:
+          type: string
+          title: Key
+          default: registration_enabled
+        enabled:
+          type: boolean
+          title: Enabled
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        updated_by_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated By User Id
+      type: object
+      required:
+      - enabled
+      title: RegistrationSettingResponse
+    RegistrationStatusResponse:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+      type: object
+      required:
+      - enabled
+      title: RegistrationStatusResponse
     SyncBatchIn:
       properties:
         batch_id:

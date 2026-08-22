@@ -149,6 +149,18 @@ public sealed class InfrastructureAppDataAdapter : IAppDataService, IDisposable
         return Map(await _inner.FullResynchronizeAsync(cancellationToken));
     }
 
+    public async Task<SyncResult> UploadLocalAsync(CancellationToken cancellationToken = default)
+    {
+        if (_runtime.Offline) return new SyncResult(false, 0, 0, "离线模式：本地记录已保存在 Outbox");
+        return Map(await _inner.UploadLocalAsync(cancellationToken));
+    }
+
+    public async Task<SyncResult> DownloadCloudOverwriteAsync(CancellationToken cancellationToken = default)
+    {
+        if (_runtime.Offline) return new SyncResult(false, 0, 0, "离线模式不能下载云端覆盖");
+        return Map(await _inner.DownloadCloudOverwriteAsync(cancellationToken));
+    }
+
     public Task SaveExerciseSetupPreferenceAsync(ExerciseSetupPreferenceData preference, CancellationToken cancellationToken = default) =>
         _inner.SaveExerciseSetupPreferenceAsync(new InfraModels.ExerciseSetupPreferenceData(
             preference.ExerciseId, preference.EquipmentKey, preference.SeatPosition, preference.BenchAngle,

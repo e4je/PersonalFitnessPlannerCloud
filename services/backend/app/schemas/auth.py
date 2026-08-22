@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -25,6 +25,36 @@ class LoginRequest(BaseModel):
         ):
             raise ValueError("A syntactically valid email address is required")
         return normalized
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    email: str = Field(min_length=3, max_length=254)
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=12, max_length=1024)
+    display_name: str = Field(min_length=1, max_length=120)
+    timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=64)
+    weight_unit: Literal["KG", "LB"] = "KG"
+
+    @field_validator("email")
+    @classmethod
+    def normalize_register_email(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if (
+            normalized.count("@") != 1
+            or normalized.startswith("@")
+            or normalized.endswith("@")
+            or any(character.isspace() for character in normalized)
+        ):
+            raise ValueError("A syntactically valid email address is required")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_nontrivial_password(self) -> "RegisterRequest":
+        if self.password.isspace() or len(set(self.password)) == 1:
+            raise ValueError("Password is too weak")
+        return self
 
 
 class RefreshRequest(BaseModel):
@@ -66,6 +96,10 @@ class UserResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     deleted_at: datetime | None = None
+
+
+class RegistrationStatusResponse(BaseModel):
+    enabled: bool
 
 
 # Friendly aliases used by integrations and older tests.

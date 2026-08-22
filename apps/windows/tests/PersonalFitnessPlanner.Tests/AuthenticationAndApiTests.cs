@@ -667,13 +667,12 @@ public sealed class AuthenticationAndApiTests
     }
 
     [Fact]
-    public async Task FullResync_PreservesLocalDraftAndOutbox_WhileReplacingServerCaches()
+    public async Task DownloadCloudOverwrite_BlocksWhenLocalOutboxIsPending()
     {
-        using var temporary = new TemporaryDirectory("完整重新同步 保留本地");
+        using var temporary = new TemporaryDirectory("云端覆盖 阻止待上传记录");
         var paths = new AppPaths(temporary.Path);
         var repository = new FitnessRepository(new SqliteDatabase(paths));
         await repository.InitializeAsync();
-        var draft = await repository.CreatePlanDraftAsync();
         await repository.StartWorkoutAsync("A", new DateOnly(2026, 8, 9));
         var pendingBefore = (await repository.GetOutboxStatusAsync()).Pending;
         var tokenStore = new DpapiTokenStore(paths);
@@ -684,14 +683,71 @@ public sealed class AuthenticationAndApiTests
         var client = new FitnessApiClient(http, tokenStore);
         client.ConfigureBaseAddress("https://fitness.example.com/");
 
-        var result = await new SyncService(repository, client).FullResynchronizeAsync();
+        var result = await new SyncService(repository, client).DownloadCloudOverwriteAsync();
+
+        Assert.False(result.Success);
+        Assert.Contains("已阻止", result.Message);
+        Assert.Equal(pendingBefore, (await repository.GetOutboxStatusAsync()).Pending);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task DownloadCloudOverwrite_PreservesLocalDraftAfterOutboxIsCleared()
+    {
+        using var temporary = new TemporaryDirectory("云端覆盖 保留本地草稿");
+        var paths = new AppPaths(temporary.Path);
+        var repository = new FitnessRepository(new SqliteDatabase(paths));
+        await repository.InitializeAsync();
+        var draft = await repository.CreatePlanDraftAsync();
+        var pending = await repository.GetPendingOutboxAsync();
+        await repository.MarkOutboxSucceededAsync(pending.Select(item => item.Id));
+        var tokenStore = new DpapiTokenStore(paths);
+        await tokenStore.SaveAsync(TokenForRole("user"));
+        var handler = new RecordingHandler(_ => JsonResponse(HttpStatusCode.OK,
+            "{\"exercises\":[],\"equipment\":[],\"assignments\":[],\"workoutSessions\":[],\"readiness\":[],\"sync_cursor\":\"full-9\"}"));
+        using var http = new HttpClient(handler);
+        var client = new FitnessApiClient(http, tokenStore);
+        client.ConfigureBaseAddress("https://fitness.example.com/");
+
+        var result = await new SyncService(repository, client).DownloadCloudOverwriteAsync();
 
         Assert.True(result.Success);
         Assert.Equal("full-9", await repository.GetSyncCursorAsync());
         Assert.Contains(await repository.GetPlanVersionsAsync(), plan => plan.Id == draft.Id && plan.Status == "draft");
-        Assert.Equal(pendingBefore, (await repository.GetOutboxStatusAsync()).Pending);
         Assert.Single(handler.Requests);
         Assert.Equal("/api/v1/bootstrap", handler.Requests[0].PathAndQuery);
+    }
+
+    [Fact]
+    public async Task UploadLocal_SendsOutboxWithoutPullingBootstrap()
+    {
+        using var temporary = new TemporaryDirectory("只上传本地记录");
+        var paths = new AppPaths(temporary.Path);
+        var repository = new FitnessRepository(new SqliteDatabase(paths));
+        await repository.InitializeAsync();
+        await repository.StartWorkoutAsync("A", new DateOnly(2026, 8, 9));
+        var outbox = Assert.Single(await repository.GetPendingOutboxAsync());
+        var tokenStore = new DpapiTokenStore(paths);
+        await tokenStore.SaveAsync(TokenForRole("user"));
+        var handler = new RecordingHandler(request => request.PathAndQuery == "/api/v1/sync/batch"
+            ? JsonResponse(HttpStatusCode.OK, JsonSerializer.Serialize(new
+            {
+                results = new[] { new { client_outbox_id = outbox.Id, status = "accepted" } },
+                accepted_outbox_ids = new[] { outbox.Id }
+            }))
+            : JsonResponse(HttpStatusCode.NotFound, "{}"));
+        using var http = new HttpClient(handler);
+        var client = new FitnessApiClient(http, tokenStore);
+        client.ConfigureBaseAddress("https://fitness.example.com/");
+
+        var result = await new SyncService(repository, client).UploadLocalAsync();
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.Uploaded);
+        Assert.Equal(0, result.Downloaded);
+        Assert.Equal(0, (await repository.GetOutboxStatusAsync()).Pending);
+        Assert.Single(handler.Requests);
+        Assert.Equal("/api/v1/sync/batch", handler.Requests[0].PathAndQuery);
     }
 
     [Fact]

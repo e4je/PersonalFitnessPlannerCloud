@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api import admin, auth, bootstrap, cardio, catalog, health, plans, readiness, recommendation, sync, workouts
@@ -66,6 +68,13 @@ for api_router in (
 ):
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
+WEB_ROOT = Path(__file__).resolve().parent / "web"
+if WEB_ROOT.is_dir():
+    # The web console is a same-origin, bearer-token SPA. It contains no server
+    # credentials and every data operation still goes through the authenticated
+    # API/RBAC boundary above.
+    app.mount("/web", StaticFiles(directory=WEB_ROOT, html=True), name="web")
+
 
 @app.get("/", include_in_schema=False)
 def root() -> dict[str, str]:
@@ -74,4 +83,5 @@ def root() -> dict[str, str]:
         "service_version": __version__,
         "api_version": settings.api_version,
         "docs": "/docs",
+        "web": "/web/",
     }

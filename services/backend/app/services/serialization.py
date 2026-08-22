@@ -20,9 +20,11 @@ def user_to_dict(user: User) -> dict[str, Any]:
     return {
         **_sync_fields(user),
         "email": user.email,
+        "username": user.username,
         "display_name": user.display_name,
         "timezone": user.timezone,
         "weight_unit": user.weight_unit,
+        "is_active": user.is_active,
     }
 
 

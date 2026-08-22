@@ -17,6 +17,8 @@
 - 连接云端后采用增量同步和本地待传队列，断网时仍可正常记录。
 - 支持计划版本和训练快照，计划更新后不会改变过去的训练记录。
 - 登录令牌在 Android Keystore 或 Windows DPAPI 中加密保存。
+- 后端提供同源 Web 控制台 `/web/`：普通用户注册/登录，管理员账号管理、注册开关、用户训练概览以及计划草稿、发布和分配。
+- Android/Windows 登录后可选择“上传本地”或“云端覆盖”；云端覆盖在存在未上传 Outbox 时会自动阻止，避免误丢离线记录。
 
 ## 项目组成
 
@@ -79,6 +81,8 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 - API 监听 `http://127.0.0.1:8000`。
 - MySQL 只在 Docker 内部网络中开放，不映射到宿主机。
 - 数据保存在 Docker volume `personal_fitness_planner_mysql_data` 中。
+
+部署完成后可打开 `https://<你的域名>/web/` 使用 Web 控制台。首次部署先按后端文档创建超级管理员；管理员可以在“系统设置”关闭公开注册，也可以在“账号管理”创建普通账号、停用账号或重置密码。Web 页面与 API 同源，浏览器不接触 MySQL 凭据。
 
 这个 HTTP 地址适合浏览器、接口调试工具和同机运行的 Windows 客户端。Android 客户端只接受 HTTPS，即使是 Debug APK 或 `localhost` 也不会放行明文 HTTP。若要让 Android 连接自建后端，需要在 API 前配置带可信证书的 HTTPS 反向代理，并在应用中填写对应的 HTTPS 地址。
 

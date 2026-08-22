@@ -13,12 +13,13 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import build_engine
-from app.models import DailyReadiness, PlanSlotOption, PlanVersion, User
+from app.models import DailyReadiness, PlanSlotOption, PlanVersion, SystemSetting, User
 from app.seed.default_plan import seed_default_plan
 from tests.conftest import validated_mysql_test_url
 
 
 EXPECTED_TABLES = set(Base.metadata.tables)
+HEAD_REVISION = "20260823_0002"
 
 
 def _alembic_config(root: Path) -> Config:
@@ -42,12 +43,14 @@ def test_initial_alembic_revision_round_trip_and_matches_metadata(
         assert tables == EXPECTED_TABLES | {"alembic_version"}
         with engine.connect() as connection:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == "20260809_0001"
+        assert revision == HEAD_REVISION
 
         # This catches drift between the explicit initial revision and ORM metadata.
         command.check(config)
 
         with Session(engine) as session:
+            setting = session.scalar(select(SystemSetting).where(SystemSetting.key == "registration_enabled"))
+            assert setting is not None and setting.value_json == {"value": True}
             seeded = seed_default_plan(session)
             assert seeded["options"] == 79
             assert len(session.scalars(select(PlanSlotOption)).all()) == 79

@@ -51,18 +51,22 @@ class SyncCoordinatorTest {
     }
 
     @Test
-    fun fullResync_pushesOutboxThenAtomicallyReplacesServerDataAndCursor() = runTest {
+    fun fullResync_downloadsServerDataWithoutUploadingLocalChanges() = runTest {
         val local = FakeLocalStore(mutableListOf())
         val remote = FakeRemote().apply {
             bootstrapResponse = BootstrapDto(syncCursor = "bootstrap-cursor")
         }
-        val result = coordinator(remote, local, FakeRetryEnqueuer()).fullResync()
+        val result = coordinator(remote, local, FakeRetryEnqueuer()).sync(
+            SyncTrigger.FULL_RESYNC,
+            fullResync = true,
+        )
 
         assertThat(result).isEqualTo(
             SyncResult.Success(0, 0, "bootstrap-cursor", fullResync = true),
         )
         assertThat(local.replacedBootstraps).containsExactly(remote.bootstrapResponse)
         assertThat(local.cursor).isEqualTo("bootstrap-cursor")
+        assertThat(remote.requests).isEmpty()
     }
 
     @Test
@@ -115,6 +119,46 @@ class SyncCoordinatorTest {
         assertThat(local.items).containsExactly(item)
         assertThat(local.failedIds).containsExactly(item.id)
         assertThat(retries.calls).isEqualTo(1)
+    }
+
+    @Test
+    fun uploadLocal_pushesOutboxWithoutPullingCloudData() = runTest {
+        val item = outboxItem()
+        val local = FakeLocalStore(mutableListOf(item)).apply { cursor = "c-local" }
+        val remote = FakeRemote()
+
+        val result = coordinator(remote, local, FakeRetryEnqueuer()).uploadLocal()
+
+        assertThat(result).isEqualTo(SyncResult.Success(1, 0, "c-local", fullResync = false))
+        assertThat(local.items).isEmpty()
+        assertThat(remote.bootstrapCalls).isEqualTo(0)
+        assertThat(local.appliedChanges).isEmpty()
+    }
+
+    @Test
+    fun downloadCloudOverwrite_refusesToDiscardPendingLocalChanges() = runTest {
+        val local = FakeLocalStore(mutableListOf(outboxItem()))
+        val remote = FakeRemote()
+
+        val result = coordinator(remote, local, FakeRetryEnqueuer()).downloadCloudOverwrite()
+
+        assertThat(result).isEqualTo(SyncResult.LocalChangesPending(1))
+        assertThat(remote.bootstrapCalls).isEqualTo(0)
+        assertThat(local.replacedBootstraps).isEmpty()
+    }
+
+    @Test
+    fun downloadCloudOverwrite_replacesServerCacheWithoutUploading() = runTest {
+        val local = FakeLocalStore(mutableListOf())
+        val remote = FakeRemote().apply {
+            bootstrapResponse = BootstrapDto(syncCursor = "cloud-cursor")
+        }
+
+        val result = coordinator(remote, local, FakeRetryEnqueuer()).downloadCloudOverwrite()
+
+        assertThat(result).isEqualTo(SyncResult.Success(0, 0, "cloud-cursor", fullResync = true))
+        assertThat(remote.requests).isEmpty()
+        assertThat(local.replacedBootstraps).containsExactly(remote.bootstrapResponse)
     }
 
     private fun coordinator(

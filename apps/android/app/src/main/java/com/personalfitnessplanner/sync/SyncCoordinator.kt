@@ -45,16 +45,66 @@ class SyncCoordinator(
 
     suspend fun backgroundSync(): SyncResult = sync(SyncTrigger.BACKGROUND)
 
-    suspend fun fullResync(): SyncResult = sync(SyncTrigger.FULL_RESYNC, fullResync = true)
+    /** Download the server-authoritative cache without uploading local mutations. */
+    suspend fun fullResync(): SyncResult = downloadCloudOverwrite()
+
+    /** Upload local Outbox mutations without pulling or replacing the local plan cache. */
+    suspend fun uploadLocal(): SyncResult = withLock {
+        try {
+            val pushed = pushOutbox()
+            SyncResult.Success(
+                pushedCount = pushed,
+                pulledCount = 0,
+                cursor = localStore.readCursor(),
+                fullResync = false,
+            )
+        } catch (error: IOException) {
+            retryable(error.message ?: "Network unavailable", error)
+        } catch (error: HttpException) {
+            if (error.code().isRetryableHttpCode()) {
+                retryable("Server temporarily unavailable (${error.code()})", error)
+            } else {
+                SyncResult.PermanentFailure("Upload request failed (${error.code()})", error.code(), error)
+            }
+        } catch (error: Exception) {
+            SyncResult.PermanentFailure(error.message ?: "Unable to upload local data", cause = error)
+        }
+    }
+
+    /** Download the server bootstrap without first pushing local mutations. */
+    suspend fun downloadCloudOverwrite(): SyncResult = withLock {
+        val pendingCount = localStore.pendingOutboxCount()
+        if (pendingCount > 0) return@withLock SyncResult.LocalChangesPending(pendingCount)
+        try {
+            val pull = pullBootstrap()
+            SyncResult.Success(
+                pushedCount = 0,
+                pulledCount = pull.count,
+                cursor = pull.cursor,
+                fullResync = true,
+            )
+        } catch (error: IOException) {
+            retryable(error.message ?: "Network unavailable", error)
+        } catch (error: HttpException) {
+            if (error.code().isRetryableHttpCode()) {
+                retryable("Server temporarily unavailable (${error.code()})", error)
+            } else {
+                SyncResult.PermanentFailure("Download request failed (${error.code()})", error.code(), error)
+            }
+        } catch (error: Exception) {
+            SyncResult.PermanentFailure(error.message ?: "Unable to download cloud data", cause = error)
+        }
+    }
 
     suspend fun sync(
         trigger: SyncTrigger = SyncTrigger.MANUAL,
         fullResync: Boolean = trigger == SyncTrigger.FULL_RESYNC,
     ): SyncResult {
+        if (fullResync) return downloadCloudOverwrite()
         if (!mutex.tryLock()) return SyncResult.AlreadyRunning
         return try {
             val pushed = pushOutbox()
-            val pull = if (fullResync) pullBootstrap() else pullIncremental()
+            val pull = pullIncremental()
             SyncResult.Success(
                 pushedCount = pushed,
                 pulledCount = pull.count,
@@ -78,6 +128,17 @@ class SyncCoordinator(
                 message = error.message ?: "Unable to synchronize local data",
                 cause = error,
             )
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    private suspend fun withLock(block: suspend () -> SyncResult): SyncResult {
+        if (!mutex.tryLock()) {
+            return SyncResult.AlreadyRunning
+        }
+        return try {
+            block()
         } finally {
             mutex.unlock()
         }
@@ -156,8 +217,11 @@ class SyncCoordinator(
 
     private suspend fun pullBootstrap(): PullResult {
         val bootstrap = remote.bootstrap()
-        localStore.replaceServerOwnedData(bootstrap)
         val cursor = bootstrap.syncCursor ?: bootstrap.cursor
+        if (cursor.isNullOrBlank()) {
+            throw IOException("Bootstrap response did not include a synchronization cursor")
+        }
+        localStore.replaceServerOwnedData(bootstrap)
         localStore.writeCursor(cursor)
         return PullResult(bootstrap.itemCount(), cursor, fullResync = true)
     }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -308,3 +308,91 @@ class SyncStatusResponse(BaseModel):
     pending_operations: int = 0
     failed_operations: int = 0
     message: str | None = None
+
+
+class RegistrationSettingPatch(AdminInput):
+    enabled: bool
+
+
+class RegistrationSettingResponse(BaseModel):
+    key: str = "registration_enabled"
+    enabled: bool
+    updated_at: datetime | None = None
+    updated_by_user_id: str | None = None
+
+
+class AdminUserCreate(AdminInput):
+    email: str = Field(min_length=3, max_length=254)
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=12, max_length=1024)
+    display_name: str = Field(min_length=1, max_length=120)
+    timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=64)
+    weight_unit: Literal["KG", "LB"] = "KG"
+    roles: list[str] = Field(default_factory=lambda: ["user"])
+
+
+class AdminUserPatch(AdminInput):
+    expected_version: int = Field(ge=1)
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    weight_unit: Literal["KG", "LB"] | None = None
+    is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=12, max_length=1024)
+    roles: list[str] | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "AdminUserPatch":
+        if not (self.model_fields_set - {"expected_version"}):
+            raise ValueError("At least one field must be supplied")
+        return self
+
+
+class AdminUserResponse(BaseModel):
+    id: str
+    email: str
+    username: str
+    display_name: str
+    timezone: str
+    weight_unit: str
+    is_active: bool
+    is_superuser: bool
+    roles: list[str] = Field(default_factory=list)
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    last_login_at: datetime | None = None
+
+
+class AdminUserPage(BaseModel):
+    items: list[AdminUserResponse]
+    cursor: str | None = None
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class AdminPlanSummary(BaseModel):
+    id: str
+    plan_id: str
+    plan_name: str
+    version_number: int
+    status: str
+    version: int
+    weekly_frequency: int
+    updated_at: datetime
+    published_at: datetime | None = None
+
+
+class AdminPlanPage(BaseModel):
+    items: list[AdminPlanSummary]
+    cursor: str | None = None
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class AdminUserOverview(BaseModel):
+    user: AdminUserResponse
+    assignments: list[JsonObject] = Field(default_factory=list)
+    plans: list[JsonObject] = Field(default_factory=list)
+    workout_sessions: list[JsonObject] = Field(default_factory=list)
+    readiness: list[JsonObject] = Field(default_factory=list)
+    cardio_sessions: list[JsonObject] = Field(default_factory=list)

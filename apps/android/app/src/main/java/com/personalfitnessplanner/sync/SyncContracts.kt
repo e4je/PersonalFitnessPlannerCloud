@@ -30,6 +30,8 @@ data class OutboxItem(
  */
 interface SyncLocalStore {
     suspend fun pendingOutbox(limit: Int): List<OutboxItem>
+    /** Number of local mutations that have not been acknowledged by the server. */
+    suspend fun pendingOutboxCount(): Int = pendingOutbox(1).size
     suspend fun markOutboxSynced(ids: List<String>)
     suspend fun markOutboxFailed(id: String, message: String, retryable: Boolean)
     suspend fun applyIncrementalChanges(changes: SyncChangesDto)
@@ -101,6 +103,9 @@ sealed interface SyncResult {
         val httpCode: Int? = null,
         val cause: Throwable? = null,
     ) : SyncResult
+
+    /** Cloud overwrite is intentionally blocked while local mutations are pending. */
+    data class LocalChangesPending(val count: Int) : SyncResult
 
     data object AlreadyRunning : SyncResult
 }

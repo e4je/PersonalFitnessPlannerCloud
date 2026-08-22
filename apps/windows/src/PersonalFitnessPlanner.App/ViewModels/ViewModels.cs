@@ -1227,6 +1227,22 @@ public sealed partial class SettingsViewModel : ViewModelBase
     }, "完整重新同步完成");
 
     [RelayCommand]
+    private async Task UploadLocalAsync() => await RunAsync(async () =>
+    {
+        var result = await _data.UploadLocalAsync();
+        if (!result.Success) throw new InvalidOperationException(result.Message);
+        StatusMessage = result.Message;
+    }, "本地记录上传完成");
+
+    [RelayCommand]
+    private async Task DownloadCloudOverwriteAsync() => await RunAsync(async () =>
+    {
+        var result = await _data.DownloadCloudOverwriteAsync();
+        if (!result.Success) throw new InvalidOperationException(result.Message);
+        StatusMessage = result.Message;
+    }, "云端数据覆盖完成");
+
+    [RelayCommand]
     private async Task BackupAsync() => await RunAsync(async () => StatusMessage = $"备份：{await _data.CreateBackupAsync()}", "备份完成");
 
     [RelayCommand]

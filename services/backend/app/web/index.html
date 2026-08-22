@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'; form-action 'self'">
+  <title>Personal Fitness Planner Cloud</title>
+  <link rel="stylesheet" href="/web/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/web/" aria-label="Personal Fitness Planner Cloud 首页">
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <span><strong>Personal Fitness Planner</strong><small>Cloud Console</small></span>
+      </a>
+      <div class="topbar-actions">
+        <span id="connection-state" class="status-dot">未连接</span>
+        <button id="logout-button" class="button button-ghost hidden" type="button">退出登录</button>
+      </div>
+    </header>
+
+    <main class="page" id="auth-view">
+      <section class="auth-layout" aria-labelledby="auth-title">
+        <div class="intro-panel">
+          <p class="eyebrow">YOUR TRAINING, IN SYNC</p>
+          <h1 id="auth-title">把训练计划和每一次完成，放在同一个云端。</h1>
+          <p class="intro-copy">登录后可在 Web、Android 和 Windows 之间同步。管理员可以管理账号、发布计划并查看训练进度。</p>
+          <div class="feature-list" aria-label="功能概览">
+            <span>✓ 离线训练，联网后可靠同步</span>
+            <span>✓ 计划版本不可变，历史记录可追溯</span>
+            <span>✓ 管理员权限与审计日志</span>
+          </div>
+        </div>
+        <div class="card auth-card">
+          <div class="segmented" role="tablist" aria-label="账号操作">
+            <button class="segment active" data-auth-tab="login" role="tab" aria-selected="true" type="button">登录</button>
+            <button class="segment" data-auth-tab="register" role="tab" aria-selected="false" type="button">注册</button>
+          </div>
+          <form id="login-form" class="form-stack" novalidate>
+            <label>邮箱<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
+            <label>密码<input name="password" type="password" autocomplete="current-password" required minlength="1"></label>
+            <button class="button button-primary" type="submit">登录云端</button>
+          </form>
+          <form id="register-form" class="form-stack hidden" novalidate>
+            <p id="registration-note" class="hint"></p>
+            <label>邮箱<input name="email" type="email" autocomplete="email" required maxlength="254"></label>
+            <label>用户名<input name="username" autocomplete="username" required minlength="3" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{2,63}"><span class="field-hint">3–64 位字母、数字、点、下划线或短横线</span></label>
+            <label>显示名称<input name="display_name" autocomplete="name" required maxlength="120"></label>
+            <label>密码<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"><span class="field-hint">至少 12 位</span></label>
+            <label>时区<input name="timezone" value="Asia/Shanghai" autocomplete="off" required maxlength="64"></label>
+            <button class="button button-primary" type="submit">创建个人账号</button>
+          </form>
+          <p id="auth-error" class="error" role="alert" aria-live="polite"></p>
+        </div>
+      </section>
+    </main>
+
+    <main class="page hidden" id="dashboard-view">
+      <section class="dashboard-heading">
+        <div>
+          <p class="eyebrow" id="role-label">CLOUD WORKSPACE</p>
+          <h1 id="welcome-title">欢迎回来</h1>
+          <p id="welcome-copy" class="muted"></p>
+        </div>
+        <button id="refresh-button" class="button button-secondary" type="button">刷新数据</button>
+      </section>
+
+      <nav class="workspace-tabs" aria-label="工作区导航">
+        <button class="workspace-tab active" data-panel="overview" type="button">概览</button>
+        <button class="workspace-tab admin-only hidden" data-panel="users" type="button">账号管理</button>
+        <button class="workspace-tab admin-only hidden" data-panel="plans" type="button">计划管理</button>
+        <button class="workspace-tab admin-only hidden" data-panel="settings" type="button">系统设置</button>
+      </nav>
+
+      <section class="workspace-panel" data-panel-view="overview">
+        <div class="metric-grid">
+          <article class="metric-card"><span>当前计划</span><strong id="metric-plan">—</strong><small id="metric-plan-version">—</small></article>
+          <article class="metric-card"><span>训练记录</span><strong id="metric-workouts">0</strong><small>云端已保存</small></article>
+          <article class="metric-card"><span>待处理同步</span><strong id="metric-sync">—</strong><small>客户端本地状态</small></article>
+          <article class="metric-card accent"><span>账号角色</span><strong id="metric-role">普通用户</strong><small id="metric-email">—</small></article>
+        </div>
+        <div class="content-grid two-columns">
+          <article class="card">
+            <div class="card-heading"><div><p class="eyebrow">CURRENT PLAN</p><h2>我的云端计划</h2></div><span id="plan-status" class="badge">—</span></div>
+            <div id="plan-summary" class="plan-summary empty-state">登录后加载当前计划</div>
+          </article>
+          <article class="card">
+            <div class="card-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>最近训练</h2></div></div>
+            <div id="recent-workouts" class="list-stack empty-state">暂无训练记录</div>
+          </article>
+        </div>
+        <article class="card admin-only hidden" id="admin-overview-card">
+          <div class="card-heading"><div><p class="eyebrow">ADMIN SNAPSHOT</p><h2>管理概览</h2></div></div>
+          <div class="inline-actions"><span id="admin-user-count">—</span><span id="admin-registration-state">—</span></div>
+        </article>
+      </section>
+
+      <section class="workspace-panel hidden" data-panel-view="users">
+        <div class="content-grid two-columns users-layout">
+          <article class="card">
+            <div class="card-heading"><div><p class="eyebrow">PEOPLE</p><h2>账号</h2></div><button id="reload-users" class="button button-ghost" type="button">刷新</button></div>
+            <div class="toolbar"><label class="search-label"><span class="sr-only">搜索账号</span><input id="user-search" type="search" placeholder="搜索邮箱、用户名或名称"></label><button id="create-user-toggle" class="button button-primary" type="button">创建账号</button></div>
+            <form id="create-user-form" class="form-grid hidden" novalidate>
+              <label>邮箱<input name="email" type="email" required maxlength="254"></label>
+              <label>用户名<input name="username" required minlength="3" maxlength="64"></label>
+              <label>显示名称<input name="display_name" required maxlength="120"></label>
+              <label>初始密码<input name="password" type="password" required minlength="12" maxlength="1024"></label>
+              <label>时区<input name="timezone" value="Asia/Shanghai" required maxlength="64"></label>
+              <label>角色<select name="roles" id="create-user-role"><option value="user">普通用户</option><option value="admin" class="superuser-only hidden">管理员</option></select></label>
+              <div class="form-actions"><button class="button button-primary" type="submit">保存账号</button><button id="cancel-create-user" class="button button-ghost" type="button">取消</button></div>
+            </form>
+            <div id="user-table" class="table-wrap"></div>
+          </article>
+          <article class="card" id="user-detail-card">
+            <div class="card-heading"><div><p class="eyebrow">ACCOUNT DETAIL</p><h2 id="selected-user-title">选择一个账号</h2></div></div>
+            <div id="selected-user-content" class="empty-state">可以查看训练记录、当前分配和计划版本。</div>
+            <form id="edit-user-form" class="form-stack hidden">
+              <input name="id" type="hidden"><input name="expected_version" type="hidden">
+              <label>显示名称<input name="display_name" required maxlength="120"></label>
+              <label>时区<input name="timezone" required maxlength="64"></label>
+              <label>重置密码（留空不修改）<input name="password" type="password" minlength="12" maxlength="1024"></label>
+              <label class="checkbox-row"><input name="is_active" type="checkbox"> 允许登录</label>
+              <label>角色<select name="roles"><option value="user">普通用户</option><option value="admin" class="superuser-only hidden">管理员</option></select></label>
+              <div class="form-actions"><button class="button button-primary" type="submit">保存账号设置</button><button id="assign-selected-plan" class="button button-secondary" type="button">分配计划</button></div>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section class="workspace-panel hidden" data-panel-view="plans">
+        <div class="content-grid two-columns plans-layout">
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">VERSIONS</p><h2>计划版本</h2></div><button id="reload-plans" class="button button-ghost" type="button">刷新</button></div><div id="plan-table" class="table-wrap"></div></article>
+          <article class="card"><div class="card-heading"><div><p class="eyebrow">VERSION EDITOR</p><h2 id="selected-plan-title">选择版本</h2></div><span id="selected-plan-status" class="badge">—</span></div><p class="hint">已发布版本不可原地修改。点击“创建草稿”后编辑 JSON，保存并发布新版本。</p><textarea id="plan-editor" class="code-editor" spellcheck="false" aria-label="计划版本 JSON"></textarea><div class="form-actions"><button id="draft-plan" class="button button-secondary" type="button">创建草稿</button><button id="save-plan" class="button button-primary" type="button">保存草稿</button><button id="publish-plan" class="button button-ghost" type="button">发布版本</button></div><p id="plan-editor-error" class="error" role="alert"></p></article>
+        </div>
+      </section>
+
+      <section class="workspace-panel hidden" data-panel-view="settings">
+        <div class="content-grid two-columns"><article class="card"><div class="card-heading"><div><p class="eyebrow">POLICY</p><h2>注册控制</h2></div><span id="registration-badge" class="badge">—</span></div><p class="muted">关闭后，未登录访客不能创建新账号；现有账号不受影响。</p><label class="switch-row"><span>允许公开注册</span><input id="registration-toggle" type="checkbox"><span class="switch-visual" aria-hidden="true"></span></label><p id="settings-updated" class="hint"></p></article><article class="card"><div class="card-heading"><div><p class="eyebrow">SECURITY</p><h2>权限边界</h2></div></div><ul class="policy-list"><li>普通管理员可以创建和维护普通账号。</li><li>只有超级管理员可以授予或撤销管理员角色。</li><li>停用账号或重置密码会撤销其刷新令牌。</li><li>计划通过草稿、校验、发布和分配流程变更。</li></ul></article></div>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script type="module" src="/web/app.js"></script>
+</body>
+</html>

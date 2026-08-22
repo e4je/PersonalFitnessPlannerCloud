@@ -166,6 +166,8 @@ public interface IAppDataService
     Task<AuthenticationState> GetAuthenticationStateAsync(CancellationToken cancellationToken = default);
     Task<SyncResult> SynchronizeAsync(CancellationToken cancellationToken = default);
     Task<SyncResult> FullResynchronizeAsync(CancellationToken cancellationToken = default);
+    Task<SyncResult> UploadLocalAsync(CancellationToken cancellationToken = default);
+    Task<SyncResult> DownloadCloudOverwriteAsync(CancellationToken cancellationToken = default);
     Task SaveExerciseSetupPreferenceAsync(ExerciseSetupPreferenceData preference, CancellationToken cancellationToken = default);
     Task<ExerciseSetupPreferenceData?> GetExerciseSetupPreferenceAsync(Guid exerciseId, string equipmentKey, CancellationToken cancellationToken = default);
     Task<WeightSuggestionData> GetWeightSuggestionAsync(ExerciseOptionData option, decimal minimumIncrementKg = 2.5m, CancellationToken cancellationToken = default);

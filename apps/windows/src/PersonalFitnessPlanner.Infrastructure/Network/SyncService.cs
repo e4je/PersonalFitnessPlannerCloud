@@ -58,10 +58,11 @@ public sealed class SyncService
             if (string.IsNullOrWhiteSpace(cursor))
             {
                 var bootstrap = await _apiClient.GetBootstrapAsync(cancellationToken).ConfigureAwait(false);
-                downloaded += await _repository.ApplyBootstrapAsync(bootstrap.GetRawText(), cancellationToken).ConfigureAwait(false);
                 cursor = ReadCursor(bootstrap);
-                if (!string.IsNullOrWhiteSpace(cursor))
-                    await _repository.SetSyncCursorAsync(cursor, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(cursor))
+                    throw new IOException("服务器 bootstrap 未返回同步游标，未修改本地缓存。");
+                downloaded += await _repository.ApplyBootstrapAsync(bootstrap.GetRawText(), cancellationToken).ConfigureAwait(false);
+                await _repository.SetSyncCursorAsync(cursor, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             var fullResyncAttempted = false;
             for (var pageNumber = 0; pageNumber < 100; pageNumber++)
@@ -76,14 +77,14 @@ public sealed class SyncService
 
                     fullResyncAttempted = true;
                     var bootstrap = await _apiClient.GetBootstrapAsync(cancellationToken).ConfigureAwait(false);
-                    downloaded += await _repository.ApplyFullBootstrapAsync(
-                        bootstrap.GetRawText(), cancellationToken).ConfigureAwait(false);
                     var bootstrapCursor = ReadCursor(bootstrap);
                     if (string.IsNullOrWhiteSpace(bootstrapCursor))
                     {
                         throw new IOException("完整 bootstrap 未返回同步游标，未推进本地游标。");
                     }
 
+                    downloaded += await _repository.ApplyFullBootstrapAsync(
+                        bootstrap.GetRawText(), cancellationToken).ConfigureAwait(false);
                     cursor = bootstrapCursor;
                     await _repository.SetSyncCursorAsync(cursor, cancellationToken: cancellationToken)
                         .ConfigureAwait(false);
@@ -118,27 +119,84 @@ public sealed class SyncService
         }
     }
 
-    public async Task<SyncResult> FullResynchronizeAsync(CancellationToken cancellationToken = default)
+    /// <summary>Uploads pending local mutations and deliberately does not pull cloud data.</summary>
+    public async Task<SyncResult> UploadLocalAsync(CancellationToken cancellationToken = default)
     {
         if (!await _syncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
             return new SyncResult(false, 0, 0, "同步已在进行中。");
+
+        IReadOnlyList<OutboxItem> pending = [];
         try
         {
-            var bootstrap = await _apiClient.GetBootstrapAsync(cancellationToken).ConfigureAwait(false);
-            var downloaded = await _repository.ApplyFullBootstrapAsync(bootstrap.GetRawText(), cancellationToken).ConfigureAwait(false);
-            var cursor = ReadCursor(bootstrap);
-            await _repository.SetSyncCursorAsync(cursor, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new SyncResult(true, 0, downloaded,
-                $"完整重新同步完成：重建 {downloaded} 条服务器缓存；本地草稿、训练 Outbox 和设置均已保留。");
+            pending = await _repository.ClaimPendingOutboxAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (pending.Count == 0)
+                return new SyncResult(true, 0, 0, "没有待上传的本地记录。");
+
+            var batch = await _apiClient.SendBatchAsync(pending, cancellationToken).ConfigureAwait(false);
+            await _repository.MarkOutboxSucceededAsync(batch.AcceptedOutboxIds, cancellationToken).ConfigureAwait(false);
+            await _repository.RecordSyncBatchFailuresAsync(batch.Failures, cancellationToken).ConfigureAwait(false);
+            var accepted = batch.AcceptedOutboxIds.Count;
+            var detailedFailureIds = batch.Failures.Select(item => item.OutboxId).ToHashSet();
+            var missing = pending
+                .Where(item => !batch.AcceptedOutboxIds.Contains(item.Id) && !detailedFailureIds.Contains(item.Id))
+                .Select(item => item.Id)
+                .ToArray();
+            if (missing.Length > 0)
+                await _repository.MarkOutboxFailedAsync(missing, "服务器未返回该操作的确认结果。", cancellationToken).ConfigureAwait(false);
+
+            var failed = batch.Failures.Count + missing.Length;
+            var detail = batch.Failures.FirstOrDefault() is { } failure
+                ? (string.IsNullOrWhiteSpace(failure.Error) ? failure.Status : $"{failure.Status}: {failure.Error}")
+                : "";
+            return failed == 0
+                ? new SyncResult(true, accepted, 0, $"本地记录上传完成：{accepted} 项。")
+                : new SyncResult(false, accepted, 0, $"上传完成但有 {failed} 项失败，本地 Outbox 已保留：{detail}");
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or TaskCanceledException)
         {
-            return new SyncResult(false, 0, 0, $"完整重新同步失败，本地数据未丢失：{exception.Message}");
+            if (pending.Count > 0)
+                await _repository.MarkOutboxFailedAsync(pending.Select(item => item.Id), exception.Message, CancellationToken.None)
+                    .ConfigureAwait(false);
+            return new SyncResult(false, 0, 0, $"暂时无法上传，本地记录已保留：{exception.Message}");
         }
         finally
         {
             _syncGate.Release();
         }
+    }
+
+    /// <summary>Replaces server-owned local caches from bootstrap without uploading local changes.</summary>
+    public async Task<SyncResult> DownloadCloudOverwriteAsync(CancellationToken cancellationToken = default)
+    {
+        if (!await _syncGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            return new SyncResult(false, 0, 0, "同步已在进行中。");
+        try
+        {
+            var outbox = await _repository.GetOutboxStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (outbox.Pending > 0)
+                return new SyncResult(false, 0, 0, $"云端覆盖已阻止：本地仍有 {outbox.Pending} 项待上传，请先上传或备份。");
+
+            var bootstrap = await _apiClient.GetBootstrapAsync(cancellationToken).ConfigureAwait(false);
+            var cursor = ReadCursor(bootstrap);
+            if (string.IsNullOrWhiteSpace(cursor))
+                throw new IOException("云端 bootstrap 未返回同步游标。");
+            var downloaded = await _repository.ApplyFullBootstrapAsync(bootstrap.GetRawText(), cancellationToken).ConfigureAwait(false);
+            await _repository.SetSyncCursorAsync(cursor, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return new SyncResult(true, 0, downloaded, $"云端数据已覆盖本地缓存：下载 {downloaded} 项。");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or TaskCanceledException)
+        {
+            return new SyncResult(false, 0, 0, $"云端覆盖失败，本地数据未丢失：{exception.Message}");
+        }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    public async Task<SyncResult> FullResynchronizeAsync(CancellationToken cancellationToken = default)
+    {
+        return await DownloadCloudOverwriteAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static string ReadCursor(System.Text.Json.JsonElement bootstrap)

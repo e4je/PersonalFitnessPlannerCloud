@@ -13,12 +13,19 @@
 5. 执行 `python -m scripts.seed_default_plan`；脚本幂等，不修改已发布版本。
 6. 启动应用实例，等待 `/health/ready`；再逐步切换流量。
 7. 执行 `python -m scripts.smoke_test`，核对登录、bootstrap、同步和注销。
+8. 在受控浏览器访问 `/web/`，用超级管理员验证账号管理、注册开关和计划草稿流程；不要把该地址暴露给不受信任的访客。
 
 Compose 的入口脚本适合单机：它会自动迁移和 seed。多副本生产环境应将 `RUN_MIGRATIONS=0`、`RUN_SEED=0`，改由唯一的发布任务完成，避免多个副本争用迁移锁。
 
 管理员不由应用入口自动创建。服务健康后，通过一次性 `docker compose exec -e ADMIN_EMAIL -e ADMIN_PASSWORD backend python -m scripts.create_admin` 运维命令创建或提升管理员；只把变量注入该进程，完成后立即从运维终端清除，禁止把管理员密码保存在 Compose 服务环境或 `.env` 中。
 
 普通用户同样由一次性 `python -m scripts.create_user` 运维命令创建。先完成 canonical seed；命令会在用户没有 active/scheduled assignment 时分配默认发布计划，不覆盖已有有效 assignment，也不会在未显式 `--update-password` 时轮换密码。
+
+## Web 控制台与注册
+
+FastAPI 会将 `services/backend/app/web/` 挂载为同源静态页面 `/web/`。页面只保存浏览器会话令牌，不包含数据库或服务端密钥。公开注册默认开启，管理员可通过 Web 的“系统设置”或 `PATCH /api/v1/admin/settings/registration` 关闭；公开接口始终只创建 `user` 角色，管理员角色只能由超级管理员授予。
+
+管理员账号页面可以创建、停用、重置密码和维护普通用户，查看用户的计划分配、训练、准备度和有氧概览。计划编辑遵循“新建草稿 → 校验保存 → 发布 → 分配”，已发布计划版本不会原地改写。审计日志记录账号和注册策略变更。
 
 ## HTTPS 与代理
 

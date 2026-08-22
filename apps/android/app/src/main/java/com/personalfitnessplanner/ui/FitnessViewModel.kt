@@ -102,12 +102,14 @@ class FitnessViewModel(private val container: AppContainer) : ViewModel() {
         onNavigate = ::navigate,
         onOnboardingChanged = ::onOnboardingChanged,
         onOnboardingSubmit = ::loginAndContinue,
-        onDownloadPlan = { synchronize(fullResync = true) },
+        onDownloadPlan = ::downloadCloudOverwrite,
         onUseLocalMode = ::useLocalMode,
         onStartWorkout = ::startOrResumeWorkout,
         onMarkRest = { overrideRecommendation("恢复 · 主动恢复", "已手动设为恢复日") },
         onSwitchToCardio = { overrideRecommendation("有氧 · 低强度", "已手动改为有氧") },
         onSync = { synchronize(fullResync = false) },
+        onUploadLocal = ::uploadLocal,
+        onDownloadCloudOverwrite = ::downloadCloudOverwrite,
         onExerciseStart = { startOrResumeWorkout() },
         onExerciseSkip = ::skipExercise,
         onExerciseSwap = ::swapExercise,
@@ -315,7 +317,7 @@ class FitnessViewModel(private val container: AppContainer) : ViewModel() {
                     errorMessage = null,
                 ),
             )
-            synchronize(fullResync = true)
+            downloadCloudOverwrite()
         } catch (error: Exception) {
             // Login/preflight failures never commit the candidate token, so the old account can
             // still synchronize. Clear only if Room already changed identity and the matching new
@@ -1009,19 +1011,40 @@ class FitnessViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepository.setApiBaseUrl(normalized)
     }
 
-    private fun synchronize(fullResync: Boolean) = launchAction {
+    private fun synchronize(fullResync: Boolean) = runSyncOperation(
+        message = if (fullResync) "正在重新同步…" else "正在同步…",
+    ) {
+        if (fullResync) container.syncCoordinator.fullResync() else container.syncCoordinator.manualSync()
+    }
+
+    private fun uploadLocal() = runSyncOperation("正在上传本地记录…") {
+        container.syncCoordinator.uploadLocal()
+    }
+
+    private fun downloadCloudOverwrite() = runSyncOperation("正在下载云端计划…") {
+        container.syncCoordinator.downloadCloudOverwrite()
+    }
+
+    private fun runSyncOperation(
+        message: String,
+        operation: suspend () -> SyncResult,
+    ) = launchAction {
         if (currentSettings.localMode || container.tokenStore.read() == null) {
             emitMessage("当前为本地模式；登录后可同步云端。")
             return@launchAction
         }
-        updateSyncUi(SyncStatus.Syncing, "正在同步…")
-        when (val result = if (fullResync) container.syncCoordinator.fullResync() else container.syncCoordinator.manualSync()) {
+        updateSyncUi(SyncStatus.Syncing, message)
+        when (val result = operation()) {
             is SyncResult.Success -> {
                 updateSyncUi(SyncStatus.Synced, "已推送 ${result.pushedCount}，拉取 ${result.pulledCount}")
                 rebuildHistoryAndHome(historyRecords.map { it.session })
             }
             is SyncResult.RetryableFailure -> updateSyncUi(SyncStatus.Offline, "网络不可用，已安排重试")
             is SyncResult.PermanentFailure -> updateSyncUi(SyncStatus.Failed, result.message)
+            is SyncResult.LocalChangesPending -> {
+                updateSyncUi(SyncStatus.Failed, "有 ${result.count} 项本地记录待上传")
+                emitMessage("云端覆盖已阻止：请先点击“上传本地”，或先导出备份。")
+            }
             SyncResult.AlreadyRunning -> emitMessage("同步任务已在运行")
         }
     }

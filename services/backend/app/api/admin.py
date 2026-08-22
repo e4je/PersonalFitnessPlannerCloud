@@ -6,22 +6,31 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_user, get_db, require_roles
 from app.db.base import uuid4_str
 from app.models import (
     AuditLog,
+    CardioSession,
+    DailyReadiness,
     Equipment,
     Exercise,
     ExerciseAlternative,
     ExerciseCue,
     ExerciseEquipment,
+    PlanAssignment,
+    PlanVersion,
+    RefreshToken,
+    Role,
     SyncChange,
+    SystemSetting,
     TrainingPlan,
     User,
+    UserRole,
+    WorkoutSession,
 )
 from app.repositories.common import (
     EntityNotFoundError,
@@ -33,6 +42,13 @@ from app.repositories.common import (
     require_active,
 )
 from app.schemas.admin import (
+    AdminPlanPage,
+    AdminPlanSummary,
+    AdminUserCreate,
+    AdminUserOverview,
+    AdminUserPage,
+    AdminUserPatch,
+    AdminUserResponse,
     AssignmentCreate,
     AuditLogPage,
     AuditLogResponse,
@@ -44,6 +60,8 @@ from app.schemas.admin import (
     PlanVersionCreate,
     PlanVersionPatch,
     PlanVersionPublish,
+    RegistrationSettingPatch,
+    RegistrationSettingResponse,
     SyncStatusResponse,
 )
 from app.schemas.plans import PlanAssignmentOut
@@ -56,7 +74,14 @@ from app.services.plans import (
     publish_plan_version,
     serialize_plan_version,
 )
-from app.services.serialization import assignment_to_dict
+from app.services.accounts import AccountValidationError, active_role_names, create_account, replace_user_roles, validate_password, validate_timezone
+from app.services.serialization import (
+    assignment_to_dict,
+)
+from app.services.system_settings import registration_is_enabled, set_registration_enabled
+from app.api.cardio import serialize_cardio
+from app.api.readiness import serialize_readiness
+from app.api.workouts import serialize_workout
 
 
 router = APIRouter(
@@ -141,6 +166,443 @@ def _safe_commit(db: Session) -> None:
         db.commit()
     except IntegrityError as exc:
         _domain_error(db, exc)
+
+
+def _offset_cursor(cursor: str | None) -> int:
+    try:
+        return max(0, int(cursor or "0"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "cursor_invalid", "message": "Cursor must be numeric"},
+        ) from exc
+
+
+def _admin_user_value(db: Session, user: User) -> dict[str, Any]:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "username": user.username,
+        "display_name": user.display_name,
+        "timezone": user.timezone,
+        "weight_unit": user.weight_unit,
+        "is_active": bool(user.is_active),
+        "is_superuser": bool(user.is_superuser),
+        "roles": active_role_names(db, user.id),
+        "version": user.version,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+        "last_login_at": user.last_login_at,
+    }
+
+
+def _audit_safe(value: Any) -> Any:
+    """Convert response DTO values to JSON-compatible audit payloads."""
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _audit_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_audit_safe(item) for item in value]
+    return value
+
+
+def _admin_user_or_404(db: Session, user_id: str, *, for_update: bool = False) -> User:
+    statement = select(User).where(User.id == user_id, User.deleted_at.is_(None))
+    if for_update:
+        statement = statement.with_for_update()
+    user = db.scalar(statement)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "user_not_found", "message": "User was not found"},
+        )
+    return user
+
+
+def _active_admin_count(db: Session) -> int:
+    admin_role = db.scalar(
+        select(Role).where(func.lower(Role.name) == "admin", Role.deleted_at.is_(None))
+    )
+    admin_user_ids = (
+        select(UserRole.user_id).where(
+            UserRole.role_id == admin_role.id,
+            UserRole.deleted_at.is_(None),
+        )
+        if admin_role is not None
+        else None
+    )
+    privileged = User.is_superuser.is_(True)
+    if admin_user_ids is not None:
+        privileged = or_(privileged, User.id.in_(admin_user_ids))
+    return int(
+        db.scalar(
+            select(func.count(User.id)).where(
+                User.deleted_at.is_(None),
+                User.is_active.is_(True),
+                privileged,
+            )
+        )
+        or 0
+    )
+
+
+@router.get("/settings/registration", response_model=RegistrationSettingResponse)
+def get_registration_setting(
+    db: Annotated[Session, Depends(get_db)],
+) -> RegistrationSettingResponse:
+    row = db.scalar(
+        select(SystemSetting).where(SystemSetting.key == "registration_enabled")
+    )
+    return RegistrationSettingResponse(
+        enabled=registration_is_enabled(db),
+        updated_at=row.updated_at if row else None,
+        updated_by_user_id=row.updated_by_user_id if row else None,
+    )
+
+
+@router.patch("/settings/registration", response_model=RegistrationSettingResponse)
+def patch_registration_setting(
+    payload: RegistrationSettingPatch,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> RegistrationSettingResponse:
+    before = {"enabled": registration_is_enabled(db)}
+    row = set_registration_enabled(db, payload.enabled, actor_user_id=current_user.id)
+    add_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="admin.registration_setting.update",
+        entity_type="system_setting",
+        entity_id=row.id,
+        before=before,
+        after={"enabled": payload.enabled},
+        **_request_context(request),
+    )
+    _safe_commit(db)
+    return RegistrationSettingResponse(
+        enabled=payload.enabled,
+        updated_at=row.updated_at,
+        updated_by_user_id=row.updated_by_user_id,
+    )
+
+
+@router.get("/users", response_model=AdminUserPage)
+def list_users(
+    db: Annotated[Session, Depends(get_db)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    query: str | None = Query(default=None, max_length=120),
+) -> AdminUserPage:
+    offset = _offset_cursor(cursor)
+    conditions = [User.deleted_at.is_(None)]
+    if query and query.strip():
+        needle = f"%{query.strip().casefold()}%"
+        conditions.append(
+            or_(
+                func.lower(User.email).like(needle),
+                func.lower(User.username).like(needle),
+                func.lower(User.display_name).like(needle),
+            )
+        )
+    rows = list(
+        db.scalars(
+            select(User)
+            .where(*conditions)
+            .order_by(User.created_at.desc(), User.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
+        ).all()
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return AdminUserPage(
+        items=[AdminUserResponse.model_validate(_admin_user_value(db, row)) for row in rows],
+        cursor=cursor,
+        next_cursor=str(offset + len(rows)) if has_more else None,
+        has_more=has_more,
+    )
+
+
+@router.post("/users", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: AdminUserCreate,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AdminUserResponse:
+    requested_roles = {item.casefold() for item in payload.roles} or {"user"}
+    if "admin" in requested_roles and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "superuser_required", "message": "Only a superuser may create administrators"},
+        )
+    try:
+        user = create_account(
+            db,
+            email=payload.email,
+            username=payload.username,
+            password=payload.password,
+            display_name=payload.display_name,
+            timezone=payload.timezone,
+            weight_unit=payload.weight_unit,
+            role_names=requested_roles,
+        )
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.user.create",
+            entity_type="user",
+            entity_id=user.id,
+            after=_audit_safe(_admin_user_value(db, user)),
+            **_request_context(request),
+        )
+        _safe_commit(db)
+        return AdminUserResponse.model_validate(_admin_user_value(db, user))
+    except AccountValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "account_rejected", "message": str(exc)},
+        ) from exc
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserResponse)
+def patch_user(
+    user_id: str,
+    payload: AdminUserPatch,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AdminUserResponse:
+    user = _admin_user_or_404(db, user_id, for_update=True)
+    if user.version != payload.expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "version_conflict", "message": "User changed; reload before editing", "server_copy": _admin_user_value(db, user)},
+        )
+    current_roles = set(active_role_names(db, user.id))
+    if (
+        user.id != current_user.id
+        and not current_user.is_superuser
+        and (user.is_superuser or "admin" in current_roles)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "superuser_required",
+                "message": "Only a superuser may modify another privileged account",
+            },
+        )
+    if user.id == current_user.id and payload.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "self_deactivate_forbidden", "message": "You cannot deactivate your own account"},
+        )
+    requested_roles = current_roles
+    if payload.roles is not None:
+        requested_roles = {item.strip().casefold() for item in payload.roles if item.strip()}
+        if not requested_roles:
+            requested_roles = {"user"}
+        if (
+            "admin" in requested_roles
+            and "admin" not in current_roles
+            and not current_user.is_superuser
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "superuser_required", "message": "Only a superuser may grant administrator access"},
+            )
+        if "admin" in current_roles and "admin" not in requested_roles and not current_user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "superuser_required", "message": "Only a superuser may revoke administrator access"},
+            )
+    removing_privileged_access = (
+        ("admin" in current_roles and (payload.is_active is False or "admin" not in requested_roles))
+        or (user.is_superuser and payload.is_active is False)
+    )
+    if removing_privileged_access and _active_admin_count(db) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "last_admin_protected", "message": "The last active administrator cannot be deactivated"},
+        )
+    before = _admin_user_value(db, user)
+    password_changed = payload.password is not None
+    try:
+        if payload.display_name is not None:
+            user.display_name = payload.display_name
+        if payload.timezone is not None:
+            user.timezone = validate_timezone(payload.timezone)
+        if payload.weight_unit is not None:
+            user.weight_unit = payload.weight_unit
+        if payload.is_active is not None:
+            user.is_active = payload.is_active
+        if password_changed:
+            from app.core.security import hash_password
+
+            user.password_hash = hash_password(validate_password(payload.password or ""))
+            db.query(RefreshToken).filter(RefreshToken.user_id == user.id).update(
+                {RefreshToken.revoked_at: datetime.now(UTC)}, synchronize_session=False
+            )
+        if payload.roles is not None:
+            replace_user_roles(db, user, requested_roles, assigned_by=current_user.id)
+        user.version += 1
+        db.flush()
+        after = _admin_user_value(db, user)
+        add_audit_log(
+            db,
+            actor_user_id=current_user.id,
+            action="admin.user.update",
+            entity_type="user",
+            entity_id=user.id,
+            before=_audit_safe(before),
+            after=_audit_safe(after),
+            metadata={"password_changed": password_changed},
+            **_request_context(request),
+        )
+        _safe_commit(db)
+        return AdminUserResponse.model_validate(after)
+    except AccountValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "account_rejected", "message": str(exc)},
+        ) from exc
+
+
+@router.get("/users/{user_id}/overview", response_model=AdminUserOverview)
+def user_overview(
+    user_id: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> AdminUserOverview:
+    user = _admin_user_or_404(db, user_id)
+    assignments = list(
+        db.scalars(
+            select(PlanAssignment)
+            .where(PlanAssignment.user_id == user.id, PlanAssignment.deleted_at.is_(None))
+            .options(selectinload(PlanAssignment.plan_version).selectinload(PlanVersion.plan))
+            .order_by(PlanAssignment.starts_on.desc())
+            .limit(50)
+        ).all()
+    )
+    plans: list[dict[str, Any]] = []
+    seen_plans: set[str] = set()
+    for assignment in assignments:
+        version = assignment.plan_version
+        if version is None or version.id in seen_plans:
+            continue
+        seen_plans.add(version.id)
+        plans.append(
+            {
+                "id": version.id,
+                "plan_id": version.training_plan_id,
+                "plan_name": version.plan.name if version.plan else "",
+                "version_number": version.version_number,
+                "status": version.status,
+                "version": version.version,
+                "published_at": version.published_at,
+            }
+        )
+    workouts = list(
+        db.scalars(
+            select(WorkoutSession)
+            .where(WorkoutSession.user_id == user.id, WorkoutSession.deleted_at.is_(None))
+            .options(selectinload(WorkoutSession.sets))
+            .order_by(WorkoutSession.local_date.desc(), WorkoutSession.updated_at.desc())
+            .limit(100)
+        ).unique()
+    )
+    readiness = list(
+        db.scalars(
+            select(DailyReadiness)
+            .where(DailyReadiness.user_id == user.id, DailyReadiness.deleted_at.is_(None))
+            .order_by(DailyReadiness.local_date.desc())
+            .limit(100)
+        ).all()
+    )
+    cardio = list(
+        db.scalars(
+            select(CardioSession)
+            .where(CardioSession.user_id == user.id, CardioSession.deleted_at.is_(None))
+            .order_by(CardioSession.local_date.desc())
+            .limit(100)
+        ).all()
+    )
+    return AdminUserOverview(
+        user=AdminUserResponse.model_validate(_admin_user_value(db, user)),
+        assignments=[assignment_to_dict(item) for item in assignments],
+        plans=plans,
+        workout_sessions=[serialize_workout(item).model_dump(mode="json") for item in workouts],
+        readiness=[serialize_readiness(item).model_dump(mode="json") for item in readiness],
+        cardio_sessions=[serialize_cardio(item).model_dump(mode="json") for item in cardio],
+    )
+
+
+@router.get("/plans", response_model=AdminPlanPage)
+def list_admin_plans(
+    db: Annotated[Session, Depends(get_db)],
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    status_filter: str | None = Query(default=None, alias="status", max_length=16),
+) -> AdminPlanPage:
+    offset = _offset_cursor(cursor)
+    conditions = [PlanVersion.deleted_at.is_(None), TrainingPlan.deleted_at.is_(None)]
+    if status_filter:
+        conditions.append(PlanVersion.status == status_filter.casefold())
+    versions = list(
+        db.scalars(
+            select(PlanVersion)
+            .join(TrainingPlan, TrainingPlan.id == PlanVersion.training_plan_id)
+            .where(*conditions)
+            .options(selectinload(PlanVersion.plan))
+            .order_by(PlanVersion.updated_at.desc(), PlanVersion.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
+        ).all()
+    )
+    has_more = len(versions) > limit
+    versions = versions[:limit]
+    items = [
+        AdminPlanSummary(
+            id=item.id,
+            plan_id=item.training_plan_id,
+            plan_name=item.plan.name if item.plan else "",
+            version_number=item.version_number,
+            status=item.status,
+            version=item.version,
+            weekly_frequency=item.weekly_frequency,
+            updated_at=item.updated_at,
+            published_at=item.published_at,
+        )
+        for item in versions
+    ]
+    return AdminPlanPage(
+        items=items,
+        cursor=cursor,
+        next_cursor=str(offset + len(items)) if has_more else None,
+        has_more=has_more,
+    )
+
+
+@router.get("/plan-versions/{version_id}")
+def get_admin_plan_version(
+    version_id: str,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    version = db.scalar(
+        select(PlanVersion)
+        .where(PlanVersion.id == version_id, PlanVersion.deleted_at.is_(None))
+        .options(selectinload(PlanVersion.plan))
+    )
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "plan_not_found", "message": "Plan version was not found"},
+        )
+    return serialize_plan_version(version)
 
 
 def _slug(value: str) -> str:

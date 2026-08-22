@@ -85,6 +85,28 @@ fun SettingsScreen(
                     Icon(Icons.Rounded.Sync, contentDescription = null)
                     Text("  立即同步")
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = callbacks.onUploadLocal,
+                        modifier = Modifier.weight(1f).height(50.dp),
+                    ) {
+                        Text("上传本地")
+                    }
+                    OutlinedButton(
+                        onClick = callbacks.onDownloadCloudOverwrite,
+                        modifier = Modifier.weight(1f).height(50.dp),
+                    ) {
+                        Text("云端覆盖")
+                    }
+                }
+                Text(
+                    "上传本地只推送待同步记录；云端覆盖只下载服务器权威计划。存在未上传记录时会自动阻止覆盖。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("后台自动同步", style = MaterialTheme.typography.bodyLarge)

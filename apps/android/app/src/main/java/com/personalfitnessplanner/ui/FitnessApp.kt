@@ -176,6 +176,8 @@ fun FitnessAppContent(
                 callbacks = SettingsCallbacks(
                     onSettingChanged = callbacks.onSettingChanged,
                     onSync = callbacks.onSync,
+                    onUploadLocal = callbacks.onUploadLocal,
+                    onDownloadCloudOverwrite = callbacks.onDownloadCloudOverwrite,
                     onExport = callbacks.onSettingsExport,
                     onLocalBackup = callbacks.onLocalBackup,
                     onClearCache = callbacks.onClearCache,

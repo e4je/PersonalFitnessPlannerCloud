@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -18,6 +19,8 @@ from app.schemas.auth import (
     LoginRequest,
     LogoutRequest,
     MessageResponse,
+    RegisterRequest,
+    RegistrationStatusResponse,
     RefreshRequest,
     TokenResponse,
     UserResponse,
@@ -31,9 +34,12 @@ from app.services.auth import (
     login_ip_rate_key,
     login_rate_key,
     login_rate_limiter,
+    registration_ip_rate_key,
     revoke_for_logout,
     rotate_refresh_token,
 )
+from app.services.accounts import AccountValidationError, create_account
+from app.services.system_settings import registration_is_enabled
 
 
 router = APIRouter(tags=["authentication"])
@@ -63,6 +69,85 @@ def _invalid_credentials() -> HTTPException:
         detail={"code": "invalid_credentials", "message": "Email or password is incorrect"},
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+@router.get("/auth/registration-status", response_model=RegistrationStatusResponse)
+def registration_status(db: Annotated[Session, Depends(get_db)]) -> RegistrationStatusResponse:
+    """Expose only the registration policy; never expose account existence."""
+
+    return RegistrationStatusResponse(enabled=registration_is_enabled(db))
+
+
+@router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: Annotated[Session, Depends(get_db)],
+) -> TokenResponse:
+    registration_key = registration_ip_rate_key(_client_ip(request))
+    registration_allowed, registration_retry_after = login_rate_limiter.allowed(registration_key)
+    if not registration_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "registration_rate_limited",
+                "message": "Too many account creation attempts; try again later",
+            },
+            headers={"Retry-After": str(registration_retry_after)},
+        )
+    # Count every valid registration attempt, including successful ones.  A
+    # success must not reset this bucket: otherwise a bot could create an
+    # unlimited number of accounts from one source IP.
+    login_rate_limiter.register_attempt(registration_key)
+    if not registration_is_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "registration_disabled", "message": "Public registration is disabled"},
+        )
+    try:
+        user = create_account(
+            db,
+            email=payload.email,
+            username=payload.username,
+            password=payload.password,
+            display_name=payload.display_name,
+            timezone=payload.timezone,
+            weight_unit=payload.weight_unit,
+        )
+        bundle = issue_token_pair(
+            db,
+            user,
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("User-Agent"),
+        )
+        add_audit_log(
+            db,
+            actor_user_id=user.id,
+            action="auth.register",
+            entity_type="user",
+            entity_id=user.id,
+            after={"email": user.email, "username": user.username},
+            request_id=_request_id(request),
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("User-Agent"),
+        )
+        db.commit()
+    except AccountValidationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "registration_rejected", "message": str(exc)},
+        ) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "registration_conflict", "message": "Account details are already in use"},
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return _token_response(bundle)
 
 
 @router.post("/auth/login", response_model=TokenResponse)

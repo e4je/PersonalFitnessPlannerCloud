@@ -382,6 +382,36 @@ public sealed class AppDataService : IDisposable
         }
     }
 
+    public async Task<SyncResult> UploadLocalAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        await _accountGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await PrepareCurrentAccountScopeAsync(cancellationToken).ConfigureAwait(false);
+            return await Sync.UploadLocalAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _accountGate.Release();
+        }
+    }
+
+    public async Task<SyncResult> DownloadCloudOverwriteAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        await _accountGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await PrepareCurrentAccountScopeAsync(cancellationToken).ConfigureAwait(false);
+            return await Sync.DownloadCloudOverwriteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _accountGate.Release();
+        }
+    }
+
     public async Task<string> CreateBackupAsync(CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
