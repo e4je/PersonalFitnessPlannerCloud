@@ -2,6 +2,7 @@
 
 ## Unreleased - Unified repository integration
 
+- Added an Ubuntu single-server installer with scoped forwarded-header trust, automatic Nginx/Let's Encrypt configuration, and first-run setup preservation.
 - Canonical JSON seed now uses stable cross-client UUIDs, preserves legacy UUID4 history, and creates the canonical identity instead of falsely reporting it as already seeded.
 - Tightened plan change visibility and workout assignment/tree authorization; removed reusable secrets and bound runtime versions to the vendored contract.
 - Added idempotent ordinary-user provisioning with a default canonical assignment.

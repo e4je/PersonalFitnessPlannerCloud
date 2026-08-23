@@ -62,6 +62,20 @@ tag 会触发同一套 CI，但不会自动创建 GitHub Release，也不会自�
 - Windows EXE 是 `win-x64` 自包含程序，不需要预装 .NET Runtime；因为没有代码签名，首次运行时 Windows 可能显示 SmartScreen 提示。
 - Actions 构建产物来自私有仓库，只有有权限的 GitHub 账号可以下载。
 
+## Ubuntu 服务器自动部署
+
+已有外部 MySQL 8 时，可以在单台 Ubuntu 22.04、24.04 或 26.04 服务器上运行自动部署脚本。先让域名解析到服务器，并开放 80/443：
+
+```bash
+sudo bash scripts/deploy-backend-ubuntu.sh \
+  --domain fitness.example.com \
+  --email admin@example.com
+```
+
+脚本会检测并安装缺失的 Docker Engine/Compose、Nginx 和 Certbot，构建一个 backend 实例、配置可信 HTTPS，并在最后显示首次数据库配置所需的 `setup_token`。数据库账号和密码不写入命令行或 Git，而是在 `https://<你的域名>/web/` 中提交；数据库名固定为 `fitness`。
+
+脚本可重复运行。更新时先 `git pull --ff-only origin main`，再用相同参数重新执行；生产环境文件保存在 `/etc/personal-fitness-planner/backend.env`，数据库连接和自动生成的 JWT 密钥保存在私有 Docker volume 中。完整步骤、管理员创建和故障排查见 [Ubuntu 单服务器部署说明](docs/ubuntu-backend-deployment.md)。
+
 ## 本地启动云同步服务
 
 需要 Docker Engine 和 Docker Compose。仓库内置 MySQL 的最省事启动方式是运行下面的脚本；它会生成不提交到 Git 的 `.env`，写入随机数据库密码和 JWT 密钥，并启用 `bundled-db` profile：

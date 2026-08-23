@@ -20,6 +20,12 @@ jobs:
         run: ./scripts/validate-contracts.ps1 -Python python
       - name: Reject committed secrets and known development credentials
         run: python scripts/scan-secrets.py
+      - name: Validate Ubuntu deployment script
+        run: |
+          bash -n scripts/deploy-backend-ubuntu.sh
+          bash scripts/deploy-backend-ubuntu.sh --help >/dev/null
+          docker compose --env-file .env.example -f infra/docker-compose.yml config --quiet
+          docker compose --env-file services/backend/.env.example -f services/backend/docker-compose.yml config --quiet
 
   backend:
     runs-on: ubuntu-latest

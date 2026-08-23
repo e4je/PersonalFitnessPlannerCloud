@@ -1,5 +1,19 @@
 # 部署说明
 
+## Ubuntu 单服务器自动部署
+
+仓库根提供 `scripts/deploy-backend-ubuntu.sh`，面向 Ubuntu 22.04、24.04 和 26.04 的单后端部署：
+
+```bash
+sudo bash scripts/deploy-backend-ubuntu.sh \
+  --domain fitness.example.com \
+  --email admin@example.com
+```
+
+脚本检测并安装缺失的 Docker Engine/Compose、Nginx 和 Certbot，只启动一个 backend，不启用内置 MySQL。它创建权限为 `0600` 的 `/etc/personal-fitness-planner/backend.env`，将应用端口限制在 `127.0.0.1:8000`，自动识别 Docker 网关作为可信代理，申请 HTTPS 证书并显示首次 `setup_token`。MySQL 凭据仍由用户在同源 HTTPS Web 向导中填写。
+
+重复运行会保留 `personal_fitness_planner_backend_config` volume 并重新构建当前代码。更新前必须备份数据库；不得运行 `docker compose down -v`。完整前置条件、管理员创建、更新和排错步骤见仓库根的 `docs/ubuntu-backend-deployment.md`。
+
 ## 环境分层
 
 开发、测试、生产必须使用不同数据库与 JWT 密钥。生产设置 `ENVIRONMENT=production` 后，应用会拒绝默认 JWT secret 和通配 CORS，并强制 HTTPS 重定向。若 TLS 在反向代理终止，代理必须正确传递协议头并只允许可信来源访问应用端口。
@@ -45,6 +59,7 @@ FastAPI 会将 `services/backend/app/web/` 挂载为同源静态页面 `/web/`�
 
 - 只向反向代理暴露应用端口，公网仅开放 443。
 - 使用现代 TLS、HSTS 与自动证书轮换。
+- Nginx 必须传递 `X-Forwarded-Proto`；Gunicorn/Uvicorn 的 `FORWARDED_ALLOW_IPS` 只配置反向代理的实际来源 IP/网段，不得无条件设为 `*`。自动部署脚本会识别宿主机进入容器时使用的 Docker 网关。
 - 若由代理传递真实客户端 IP，必须配置可信代理边界；应用默认不会信任任意 `X-Forwarded-For`。
 - MySQL 3306 不映射到公网或宿主机。
 

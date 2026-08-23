@@ -37,6 +37,16 @@ backend/
 
 要求：Docker Engine 与 Compose 插件可用。
 
+Ubuntu 单服务器生产部署可直接从仓库根运行：
+
+```bash
+sudo bash scripts/deploy-backend-ubuntu.sh \
+  --domain fitness.example.com \
+  --email admin@example.com
+```
+
+脚本会安装缺失依赖、启动单个 backend、配置 Nginx/Let's Encrypt，并输出首次向导令牌。详细说明见仓库根的 `docs/ubuntu-backend-deployment.md`。
+
 ### 已有 MySQL：首次 Web 向导
 
 不需要先创建 `.env`。只启动 backend（内置 MySQL 位于 `bundled-db` profile，不会被默认启动）：
