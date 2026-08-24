@@ -32,6 +32,8 @@ def test_windows_native_deployment_uses_a_restricted_startup_task() -> None:
 
     assert "--require-hashes" in installer
     assert "--no-deps" in installer
+    assert "print(sys.version_info[0], sys.version_info[1], sep=chr(46))" in installer
+    assert 'print(".".join' not in installer
     assert "-UserId 'S-1-5-19'" in installer
     assert "*S-1-5-19:(OI)(CI)RX" in installer
     assert "*S-1-5-19:(OI)(CI)M" in installer

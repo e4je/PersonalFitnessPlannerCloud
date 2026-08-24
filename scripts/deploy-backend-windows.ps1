@@ -69,8 +69,13 @@ function Resolve-Python312 {
         throw '未找到 Python 3.12。请从 python.org 安装 64 位 Python 3.12，或用 -PythonPath 指定 python.exe。'
     }
 
-    $version = (& $candidate -c 'import sys; print(".".join(map(str, sys.version_info[:2])))').Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -ne '3.12') {
+    # Windows PowerShell 5.1 removes nested double quotes while constructing
+    # native-process arguments. Keep this probe quote-free so ``python -c``
+    # receives the same source under both Windows PowerShell and PowerShell 7.
+    $versionOutput = @(& $candidate -c 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))')
+    $versionExitCode = $LASTEXITCODE
+    $version = if ($versionOutput.Count -gt 0) { ([string]$versionOutput[-1]).Trim() } else { '' }
+    if ($versionExitCode -ne 0 -or $version -ne '3.12') {
         throw "后端要求 Python 3.12，当前解释器版本为 $version：$candidate"
     }
     return [System.IO.Path]::GetFullPath($candidate)
