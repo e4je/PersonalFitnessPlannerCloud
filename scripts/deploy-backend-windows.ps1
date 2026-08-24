@@ -104,7 +104,7 @@ function Stop-BackendTask {
 function Wait-BackendLiveness {
     param([Parameter(Mandatory = $true)][int]$BackendPort)
 
-    for ($attempt = 1; $attempt -le 30; $attempt++) {
+    for ($attempt = 1; $attempt -le 90; $attempt++) {
         try {
             $response = Invoke-WebRequest -Uri "http://127.0.0.1:$BackendPort/health/live" -UseBasicParsing -TimeoutSec 2
             if ($response.StatusCode -eq 200) {
@@ -116,6 +116,78 @@ function Wait-BackendLiveness {
         }
     }
     return $false
+}
+
+function Set-ManagedInstallPermissions {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManagedRoot,
+        [Parameter(Mandatory = $true)][string[]]$WritablePaths,
+        [Parameter(Mandatory = $true)][string]$InstallerGrant
+    )
+
+    # A failed older deployment may have left child files with protected ACLs
+    # that no longer inherit the repaired root permissions. Take ownership only
+    # after the caller has validated the project marker and rejected reparse
+    # points, then rebuild one predictable inheritance tree.
+    & takeown.exe /F $ManagedRoot /A /R /D Y /SKIPSL | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法取得既有安装目录的所有权：$ManagedRoot"
+    }
+
+    & icacls.exe $ManagedRoot /inheritance:r /grant:r $InstallerGrant '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法设置安装目录根 ACL：$ManagedRoot"
+    }
+
+    $childrenPattern = Join-Path $ManagedRoot '*'
+    & icacls.exe $childrenPattern /reset /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法重置安装目录子项 ACL：$ManagedRoot"
+    }
+
+    foreach ($writablePath in $WritablePaths) {
+        & icacls.exe $writablePath /inheritance:e /grant:r '*S-1-5-19:(OI)(CI)M' /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "无法设置服务可写目录 ACL：$writablePath"
+        }
+    }
+}
+
+function Write-BackendTaskDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)][int]$BackendPort,
+        [Parameter(Mandatory = $true)][string]$LogsPath
+    )
+
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+        $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+        $resultText = if ($taskInfo) {
+            $resultValue = [int64]$taskInfo.LastTaskResult
+            $resultHex = '{0:X8}' -f ($resultValue -band [uint32]::MaxValue)
+            "$resultValue (0x$resultHex)"
+        }
+        else {
+            'unknown'
+        }
+        Write-Warning "计划任务状态：$($task.State)；最近返回码：$resultText"
+    }
+    else {
+        Write-Warning "未找到计划任务 $taskName；任务注册可能被系统安全策略阻止。"
+    }
+
+    foreach ($logName in @('backend.stderr.log', 'backend.stdout.log')) {
+        $logPath = Join-Path $LogsPath $logName
+        if (Test-Path -LiteralPath $logPath -PathType Leaf) {
+            Write-Warning "后端日志：$logPath"
+            Get-Content -LiteralPath $logPath -Tail 100
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $LogsPath 'backend.stderr.log')) -and
+        -not (Test-Path -LiteralPath (Join-Path $LogsPath 'backend.stdout.log'))) {
+        Write-Warning '任务没有创建任何日志，通常表示 LOCAL SERVICE 无法读取任务脚本或服务配置。'
+    }
+    Write-Warning "本机探针：http://127.0.0.1:$BackendPort/health/live"
 }
 
 function Assert-BackendPortAvailable {
@@ -212,6 +284,16 @@ New-Item -ItemType Directory -Path $installPath, $dataPath, $configDirectory, $s
 if (-not (Test-Path -LiteralPath $installMarkerPath -PathType Leaf)) {
     Set-Content -LiteralPath $installMarkerPath -Value 'Managed by PersonalFitnessPlannerCloud native deploy script.' -Encoding ASCII
 }
+
+$existingReparsePoints = @(
+    Get-ChildItem -LiteralPath $installPath -Force -Recurse -ErrorAction Stop |
+        Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }
+)
+if ($existingReparsePoints.Count -gt 0) {
+    throw "安装目录中存在符号链接或目录联接，脚本不会递归修改 ACL：$($existingReparsePoints[0].FullName)"
+}
+Write-DeployLog '修复并统一既有安装目录权限'
+Set-ManagedInstallPermissions -ManagedRoot $installPath -WritablePaths @($dataPath, $logsPath) -InstallerGrant $installerFullControl
 
 foreach ($stalePath in @($appNewPath, $venvNewPath)) {
     if (Test-Path -LiteralPath $stalePath) {
@@ -324,16 +406,12 @@ try {
     }
 
     Write-DeployLog '限制程序为只读，并仅向 LOCAL SERVICE 开放数据与日志写入权限'
-    & icacls.exe $installPath /inheritance:r /grant:r $installerFullControl '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw '设置安装目录 ACL 失败。'
-    }
-    foreach ($writablePath in @($dataPath, $logsPath)) {
-        & icacls.exe $writablePath /inheritance:r /grant:r $installerFullControl '*S-1-5-19:(OI)(CI)M' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "设置可写目录 ACL 失败：$writablePath"
-        }
-    }
+    Set-ManagedInstallPermissions -ManagedRoot $installPath -WritablePaths @($dataPath, $logsPath) -InstallerGrant $installerFullControl
+
+    # Fail before task registration if the installer itself cannot read the two
+    # files that LOCAL SERVICE must consume at process start.
+    Get-Content -LiteralPath $serviceConfigPath -Raw -Encoding UTF8 | Out-Null
+    Get-Content -LiteralPath $installedRunnerPath -Raw -Encoding UTF8 | Out-Null
 
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $actionArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -InstallRoot "{1}"' -f $installedRunnerPath, $installPath
@@ -364,12 +442,8 @@ try {
     Start-ScheduledTask -TaskName $taskName
 
     if (-not (Wait-BackendLiveness -BackendPort $Port)) {
-        $errorLog = Join-Path $logsPath 'backend.stderr.log'
-        if (Test-Path -LiteralPath $errorLog) {
-            Write-Warning "后端错误日志：$errorLog"
-            Get-Content -LiteralPath $errorLog -Tail 80
-        }
-        throw '后端在 30 秒内没有通过 liveness 检查。'
+        Write-BackendTaskDiagnostics -BackendPort $Port -LogsPath $logsPath
+        throw '后端在 90 秒内没有通过 liveness 检查。'
     }
 }
 catch {

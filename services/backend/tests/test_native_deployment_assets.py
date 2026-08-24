@@ -48,6 +48,10 @@ def test_windows_native_deployment_uses_a_restricted_startup_task() -> None:
     assert "Assert-BackendPortAvailable -BackendPort $Port" in installer
     assert "Get-NetTCPConnection -State Listen" in installer
     assert "[IO.FileAttributes]::ReparsePoint" in installer
+    assert "takeown.exe /F $ManagedRoot /A /R /D Y /SKIPSL" in installer
+    assert "$childrenPattern /reset /T /Q" in installer
+    assert "后端在 90 秒内没有通过 liveness 检查" in installer
+    assert "Write-BackendTaskDiagnostics" in installer
     assert "-UserId 'S-1-5-18'" not in installer
     assert "127.0.0.1" in runner
     assert "--workers', '1'" in runner

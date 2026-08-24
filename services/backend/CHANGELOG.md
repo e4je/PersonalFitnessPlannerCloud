@@ -2,6 +2,7 @@
 
 ## Unreleased - Unified repository integration
 
+- Hardened Windows native redeployment by recovering ownership only inside marker-validated installs, rebuilding child ACL inheritance, and reporting scheduled-task failures before rollback.
 - Made local SQLite the zero-configuration deployment default, added persistent automatic JWT key generation, native pre-start migrations/seed, and integrity-checked live backups while retaining explicit MySQL compatibility.
 - Added an Ubuntu single-server installer with scoped forwarded-header trust, automatic Nginx/Let's Encrypt configuration, and first-run setup preservation.
 - Canonical JSON seed now uses stable cross-client UUIDs, preserves legacy UUID4 history, and creates the canonical identity instead of falsely reporting it as already seeded.

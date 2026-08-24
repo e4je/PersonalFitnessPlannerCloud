@@ -2,6 +2,7 @@
 
 ## Unreleased - Security hardening
 
+- Rebuilt Windows native-install ACL inheritance after interrupted deployments, verified critical task files before registration, and added task-result/log diagnostics with a 90-second startup allowance.
 - Switched new backend deployments to an automatically initialized local SQLite database with a persisted JWT key and consistent live-backup command; MySQL remains an explicit compatibility mode.
 - Added an idempotent Ubuntu single-server deployment script that installs missing Docker/Nginx/Certbot dependencies, configures scoped proxy trust and HTTPS, and preserves the first-run MySQL wizard.
 - Bound Windows DPAPI credentials to the normalized API origin and made legacy/cross-origin tokens fail closed; portable JSON imports can no longer replace API or local storage paths.

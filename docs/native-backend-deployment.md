@@ -100,6 +100,8 @@ $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 & icacls.exe $installRoot /grant:r "*$($currentSid):(OI)(CI)F" /T /C
 ```
 
+最新版脚本还会在确认项目管理标记且目录内没有符号链接后，自动恢复所有权并重建 ACL 继承；`LOCAL SERVICE` 对程序只有读取/执行权限，对 `data`、`logs` 有修改权限。首次迁移允许最多 90 秒。若仍失败，脚本会直接显示计划任务状态、返回码以及 stdout/stderr；“没有创建任何日志”表示任务脚本或服务配置仍被系统策略阻止读取。
+
 端口冲突时不要结束未知进程，改用另一个 `-Port`。验证：
 
 ```powershell
