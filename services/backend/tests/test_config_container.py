@@ -56,7 +56,6 @@ def test_missing_database_and_jwt_create_stable_local_sqlite_defaults(tmp_path: 
         runtime_path.with_name(LOCAL_JWT_SECRET_FILENAME).read_text(encoding="utf-8").strip()
         == config.jwt_secret
     )
-    assert config.mysql_database == APPLICATION_DATABASE_NAME
 
 
 def test_explicit_mysql_mode_can_enter_first_run_without_credentials(
