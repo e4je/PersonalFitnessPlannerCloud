@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 if python -m scripts.runtime_status; then
   python -m scripts.wait_for_database

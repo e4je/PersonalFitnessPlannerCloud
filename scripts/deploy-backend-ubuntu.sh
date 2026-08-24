@@ -31,7 +31,8 @@ usage() {
 
 脚本仅支持 Ubuntu 22.04、24.04 和 26.04。它会安装缺失的 Docker
 Engine/Compose、Nginx 和 Certbot，启动单个 backend 容器并申请 HTTPS
-证书。MySQL 地址和密码仍通过首次 Web 向导填写，数据库名固定为 fitness。
+证书。SQLite 数据库、JWT 密钥、表结构和默认训练计划会在私有数据卷中
+自动初始化，不需要安装或配置 MySQL。
 EOF
 }
 
@@ -301,12 +302,11 @@ ENVIRONMENT=production
 BACKEND_BIND_ADDRESS=127.0.0.1
 BACKEND_PORT=8000
 
-# Empty values intentionally enable the first-run database wizard. After setup,
-# the database connection and generated JWT key live in the backend_config volume.
+# SQLite data and the generated JWT key live in the backend_config volume.
+DATABASE_BACKEND=sqlite
 DATABASE_URL=
 MYSQL_PASSWORD=
 JWT_SECRET=
-SETUP_TOKEN=
 
 CORS_ORIGINS=["https://$DOMAIN"]
 FORWARDED_ALLOW_IPS=127.0.0.1,::1
@@ -430,37 +430,24 @@ request_certificate() {
 }
 
 print_result() {
-  local ready_code setup_token
+  local ready_code
   ready_code="$(
     curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
       http://127.0.0.1:8000/health/ready || true
-  )"
-  setup_token="$(
-    compose logs --no-color backend 2>/dev/null \
-      | sed -nE 's/.*setup_token=([^[:space:]"]+).*/\1/p' \
-      | tail -n 1
   )"
 
   printf '\n============================================================\n'
   printf '后端部署完成：%s\n' "https://$DOMAIN"
   printf 'Web 控制台：%s\n' "https://$DOMAIN/web/"
   printf '环境配置：%s\n' "$ENV_FILE"
-  printf '运行配置：Docker volume personal_fitness_planner_backend_config\n'
+  printf '本地数据库：Docker volume personal_fitness_planner_backend_config 中的 fitness.db\n'
   if [[ "$ready_code" == "200" ]]; then
-    printf '数据库状态：已配置，readiness 检查通过。\n'
+    printf '数据库状态：SQLite 已自动初始化，readiness 检查通过。\n'
   else
-    printf '数据库状态：等待首次配置（readiness 返回 %s，这是正常状态）。\n' \
+    printf '数据库状态：异常（readiness 返回 %s），请检查 backend 容器日志。\n' \
       "${ready_code:-unknown}"
-    if [[ -n "$setup_token" ]]; then
-      printf '一次性 setup_token：%s\n' "$setup_token"
-    else
-      printf '未能自动提取 setup_token，请运行：\n'
-      printf '  sudo docker compose --env-file %q -f %q logs backend\n' \
-        "$ENV_FILE" "$COMPOSE_FILE"
-    fi
-    printf '请通过上面的 HTTPS Web 地址填写 MySQL 地址、账号和密码。\n'
-    printf '数据库名固定为 fitness；MySQL 地址必须能从 backend 容器访问。\n'
   fi
+  printf '数据库不监听网络端口；只需开放 Web 的 80/443。\n'
   printf '============================================================\n'
 
   if ! curl -fsS --max-time 15 "https://$DOMAIN/health/live" >/dev/null; then

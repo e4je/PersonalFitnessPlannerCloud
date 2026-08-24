@@ -22,7 +22,12 @@ def test_ubuntu_native_deployment_is_loopback_only_and_hardened() -> None:
     assert "ProtectSystem=strict" in installer
     assert "ReadWritePaths=$DATA_DIR" in installer
     assert "RUNTIME_CONFIG_PATH=$DATA_DIR/backend-config.json" in installer
-    assert "setup-token" in installer
+    assert "DATABASE_BACKEND=sqlite" in installer
+    assert "SQLITE_DATABASE_PATH=$DATA_DIR/fitness.db" in installer
+    assert "fitness.db" in installer
+    assert "jwt-secret" in installer
+    assert "ExecStartPre=$VENV_DIR/bin/python -m alembic upgrade head" in installer
+    assert "ExecStartPre=$VENV_DIR/bin/python -m scripts.seed_default_plan" in installer
     assert "--host 0.0.0.0" not in installer
 
 
@@ -47,8 +52,13 @@ def test_windows_native_deployment_uses_a_restricted_startup_task() -> None:
     assert "127.0.0.1" in runner
     assert "--workers', '1'" in runner
     assert "RUNTIME_CONFIG_PATH" in runner
+    assert "DATABASE_BACKEND" in runner
+    assert "SQLITE_DATABASE_PATH" in runner
     assert "backend-config.json" in installer
-    assert "setup-token" in installer
+    assert "fitness.db" in installer
+    assert "jwt-secret" in installer
+    assert "-m alembic upgrade head" in runner
+    assert "-m scripts.seed_default_plan" in runner
     assert "0.0.0.0" not in runner
 
 

@@ -22,8 +22,12 @@ jobs:
         run: python scripts/scan-secrets.py
       - name: Validate Ubuntu deployment script
         run: |
+          bash -n scripts/bootstrap-dev.sh
           bash -n scripts/deploy-backend-ubuntu.sh
+          bash -n scripts/deploy-backend-ubuntu-native.sh
+          bash -n services/backend/docker-entrypoint.sh
           bash scripts/deploy-backend-ubuntu.sh --help >/dev/null
+          bash scripts/deploy-backend-ubuntu-native.sh --help >/dev/null
           docker compose --env-file .env.example -f infra/docker-compose.yml config --quiet
           docker compose --env-file services/backend/.env.example -f services/backend/docker-compose.yml config --quiet
 

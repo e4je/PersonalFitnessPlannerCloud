@@ -255,8 +255,14 @@ else {
     @("https://$normalizedDomain")
 }
 $runtimeConfigPath = Join-Path $dataPath 'backend-config.json'
+$databasePath = Join-Path $dataPath 'fitness.db'
+$jwtSecretPath = Join-Path $dataPath 'jwt-secret'
 
 $env:ENVIRONMENT = $environmentName
+$env:DATABASE_BACKEND = 'sqlite'
+$env:DATABASE_URL = ''
+$env:SQLITE_DATABASE_PATH = $databasePath
+$env:JWT_SECRET = ''
 $env:RUNTIME_CONFIG_PATH = $runtimeConfigPath
 $env:CORS_ORIGINS = ConvertTo-Json -InputObject $corsOrigins -Compress
 $env:PYTHONDONTWRITEBYTECODE = '1'
@@ -301,6 +307,8 @@ try {
     Copy-Item -LiteralPath $runnerSource -Destination $installedRunnerPath -Force
     $serviceConfig = [ordered]@{
         environment = $environmentName
+        database_backend = 'sqlite'
+        sqlite_database_path = $databasePath
         runtime_config_path = $runtimeConfigPath
         cors_origins = $corsOrigins
         port = $Port
@@ -393,22 +401,12 @@ catch {
     throw $deploymentError
 }
 
-$setupTokenPath = Join-Path $dataPath 'setup-token'
-$setupToken = ''
-for ($attempt = 1; $attempt -le 10 -and -not $setupToken; $attempt++) {
-    if (Test-Path -LiteralPath $setupTokenPath -PathType Leaf) {
-        $setupToken = (Get-Content -LiteralPath $setupTokenPath -Raw -Encoding UTF8).Trim()
-    }
-    if (-not $setupToken) {
-        Start-Sleep -Milliseconds 500
-    }
-}
-
 Write-Host ''
 Write-Host '============================================================'
 Write-Host 'Windows 原生后端部署完成。'
 Write-Host "计划任务：$taskName"
-Write-Host "运行配置：$runtimeConfigPath"
+Write-Host "本地数据库：$databasePath"
+Write-Host "JWT 密钥文件：$jwtSecretPath"
 Write-Host "日志目录：$logsPath"
 if ($LocalOnly) {
     Write-Host "Web 控制台：http://127.0.0.1:$Port/web/"
@@ -418,11 +416,6 @@ else {
     Write-Host "Web 控制台：https://$normalizedDomain/web/"
     Write-Host "请让 IIS、Caddy 或其他 HTTPS 反向代理转发到 127.0.0.1:$Port。"
 }
-if ($setupToken) {
-    Write-Host "一次性 setup_token：$setupToken"
-}
-else {
-    Write-Host "未读取到 setup_token，请查看：$logsPath\backend.stderr.log"
-}
-Write-Host '数据库名固定为 fitness；在 Web 页面填写 MySQL 地址、账号和密码。'
+Write-Host 'SQLite 表结构和默认训练计划已自动初始化，不需要安装或配置 MySQL。'
+Write-Host '请只映射后端 Web 端口；不要把数据库文件作为网络共享直接暴露。'
 Write-Host '============================================================'

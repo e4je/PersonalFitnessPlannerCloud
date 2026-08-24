@@ -1,8 +1,36 @@
-# 部署说明
+# Backend deployment
 
-## Ubuntu 单服务器自动部署
+## 默认数据库
 
-仓库根提供 `scripts/deploy-backend-ubuntu.sh`，面向 Ubuntu 22.04、24.04 和 26.04 的单后端部署：
+新部署默认使用 SQLite：
+
+- 数据库文件名为 `fitness.db`；
+- 未提供 `JWT_SECRET` 时，会在同一私有数据目录生成稳定的 `jwt-secret`；
+- 容器入口、Ubuntu systemd 和 Windows 计划任务都会先运行 `alembic upgrade head` 与幂等 seed；
+- 不安装数据库服务，也不开放数据库网络端口。
+
+数据目录必须只允许后端服务账号和管理员访问。生产环境还必须配置明确的 CORS 白名单，并由 Nginx、Caddy 或 IIS 提供可信 HTTPS。
+
+## 推荐入口
+
+Ubuntu 原生部署：
+
+```bash
+sudo bash scripts/deploy-backend-ubuntu-native.sh \
+  --domain fitness.example.com \
+  --email admin@example.com
+```
+
+Windows 原生部署：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\deploy-backend-windows.ps1 `
+  -Domain fitness.example.com `
+  -Port 18000
+```
+
+Ubuntu Docker 部署：
 
 ```bash
 sudo bash scripts/deploy-backend-ubuntu.sh \
@@ -10,69 +38,33 @@ sudo bash scripts/deploy-backend-ubuntu.sh \
   --email admin@example.com
 ```
 
-脚本检测并安装缺失的 Docker Engine/Compose、Nginx 和 Certbot，只启动一个 backend，不启用内置 MySQL。它创建权限为 `0600` 的 `/etc/personal-fitness-planner/backend.env`，将应用端口限制在 `127.0.0.1:8000`，自动识别 Docker 网关作为可信代理，申请 HTTPS 证书并显示首次 `setup_token`。MySQL 凭据仍由用户在同源 HTTPS Web 向导中填写。
+平台路径、HTTPS、管理员创建、更新和恢复步骤见仓库根目录：
 
-重复运行会保留 `personal_fitness_planner_backend_config` volume 并重新构建当前代码。更新前必须备份数据库；不得运行 `docker compose down -v`。完整前置条件、管理员创建、更新和排错步骤见仓库根的 `docs/ubuntu-backend-deployment.md`。
+- `docs/native-backend-deployment.md`
+- `docs/ubuntu-backend-deployment.md`
 
-不使用 Docker 时，Ubuntu 可运行 `scripts/deploy-backend-ubuntu-native.sh`，以 Python 3.12 虚拟环境、systemd、Nginx 和 Certbot 部署；Windows 可运行 `scripts/deploy-backend-windows.ps1`，安装为仅监听 loopback 的开机任务。两个原生脚本都保留独立数据目录和上一版本。完整说明见仓库根的 `docs/native-backend-deployment.md`。
+## 备份与恢复
 
-## 环境分层
+运行中的 SQLite 应使用内置在线备份，避免直接复制可能同时存在 WAL 的实时文件：
 
-开发、测试、生产必须使用不同数据库与 JWT 密钥。生产设置 `ENVIRONMENT=production` 后，应用会拒绝默认 JWT secret 和通配 CORS，并强制 HTTPS 重定向。若 TLS 在反向代理终止，代理必须正确传递协议头并只允许可信来源访问应用端口。
+```bash
+python -m scripts.backup_sqlite --output /secure/backup/fitness.db
+```
 
-## 首次数据库配置
+命令拒绝覆盖已有文件，并对新副本执行 SQLite 完整性检查。恢复时停止唯一后端实例，保留当前数据库，替换 `fitness.db` 后重新启动并检查 `/health/ready`。迁移 `jwt-secret` 可以保留现有登录；只迁移数据库则所有设备重新登录，但账号和业务数据不会丢失。
 
-后端没有 `DATABASE_URL`/`MYSQL_PASSWORD` 且运行配置路径中没有 `backend-config.json` 时会进入 setup mode，而不是退出：
+## 可选 MySQL 8
 
-- `/health/live` 返回 200；`/health/ready` 返回 503 `setup_required`。
-- `/web/` 与 `GET/POST /api/v1/setup/*` 可访问，其他业务 API 返回 503。
-- 启动日志会打印一次性 `setup_token`；令牌保存在私有运行目录，重启后仍一致，初始化完成后失效。
-- Web 只收 MySQL host、port、username、password；数据库名由代码固定为 `fitness`。
-- 后端识别或创建库，执行 Alembic 与幂等 seed，最后原子写入私有运行配置并切换数据库会话。Compose 的路径为 `/app-data/backend-config.json`，原生脚本使用操作系统受限数据目录。
+旧部署仍兼容 MySQL。设置 `DATABASE_BACKEND=mysql` 后，可以使用离散 `MYSQL_*` 字段、完整 `DATABASE_URL`，或在没有凭据时进入受一次性令牌保护的 Web 配置向导。旧版 `backend-config.json` 优先于新的 SQLite 默认值，因此更新不会静默脱离现有 MySQL 数据。
 
-首次配置必须只运行一个 backend 实例，并先完成可信 HTTPS/TLS 终止；不要通过公网 HTTP 发送数据库凭据。初始化账号需要创建库、DDL 和业务 DML 权限。完成后可按平台能力切换到单独的最小权限运行账号，但必须保证后续发布迁移仍由受控迁移任务执行。
+MySQL 账号需要迁移所需的 DDL/DML 权限，3306 不得暴露到公网。真实 MySQL 集成测试继续由 CI 执行。
 
-运行配置文件包含数据库密码和自动生成的 JWT 密钥。官方 Compose 通过 `backend_config` 命名 volume 持久化；原生脚本将文件放在仅服务账号和管理员可读的数据目录。两者都不应进入代码仓库、普通日志或公开备份。
+## 发布检查
 
-## 发布流程
+1. 备份数据库和 JWT 密钥。
+2. 验证锁定依赖、Alembic head、OpenAPI 与共享契约属于同一提交。
+3. 仅运行一个迁移实例，再启动单 worker 后端。
+4. 检查 `/health/live`、`/health/ready`、登录、bootstrap 与同步。
+5. 确认公网只经 HTTPS 代理进入，后端监听地址仍为 loopback。
 
-1. 验证 `requirements.lock`、`contracts/openapi.yaml` 和 Alembic head 已进入同一个构建产物。
-2. 构建不可变镜像并执行镜像漏洞扫描。
-3. 创建数据库快照或运行一致性备份。
-4. 用单独的一次性任务执行 `alembic upgrade head`。
-5. 执行 `python -m scripts.seed_default_plan`；脚本幂等，不修改已发布版本。
-6. 启动应用实例，等待 `/health/ready`；再逐步切换流量。
-7. 执行 `python -m scripts.smoke_test`，核对登录、bootstrap、同步和注销。
-8. 在受控浏览器访问 `/web/`，用超级管理员验证账号管理、注册开关和计划草稿流程；不要把该地址暴露给不受信任的访客。
-
-已有数据库配置时，Compose 入口脚本会自动迁移和 seed；原生部署更新则复用已初始化的数据目录和当前数据库结构。未配置时两种方式都会启动首次向导，由向导完成迁移与 seed。多副本生产环境应先用单实例完成初始化，再改由唯一发布任务执行迁移，避免多个副本争用迁移锁。
-
-管理员不由应用入口自动创建。服务健康后，通过一次性 `python -m scripts.create_admin` 运维命令创建或提升管理员；容器使用 `docker compose exec`，原生部署使用对应虚拟环境。只把变量注入该进程，完成后立即从运维终端清除，禁止把管理员密码保存在长期服务环境或 `.env` 中。
-
-普通用户同样由一次性 `python -m scripts.create_user` 运维命令创建。先完成 canonical seed；命令会在用户没有 active/scheduled assignment 时分配默认发布计划，不覆盖已有有效 assignment，也不会在未显式 `--update-password` 时轮换密码。
-
-## Web 控制台与注册
-
-FastAPI 会将 `services/backend/app/web/` 挂载为同源静态页面 `/web/`。首次向导中的数据库凭据仅通过同源 HTTPS 发送且不写浏览器存储；初始化后页面只保存浏览器会话令牌。公开注册默认开启，管理员可通过 Web 的“系统设置”或 `PATCH /api/v1/admin/settings/registration` 关闭；公开接口始终只创建 `user` 角色，管理员角色只能由超级管理员授予。
-
-管理员账号页面可以创建、停用、重置密码和维护普通用户，查看用户的计划分配、训练、准备度和有氧概览。计划编辑遵循“新建草稿 → 校验保存 → 发布 → 分配”，已发布计划版本不会原地改写。审计日志记录账号和注册策略变更。
-
-## HTTPS 与代理
-
-- 只向反向代理暴露应用端口，公网仅开放 443。
-- 使用现代 TLS、HSTS 与自动证书轮换。
-- Nginx、Caddy 或 IIS 必须传递 `X-Forwarded-Proto`；Gunicorn/Uvicorn 的可信代理范围只配置反向代理的实际来源 IP/网段，不得无条件设为 `*`。Docker 脚本会识别容器网关，原生脚本只信任 loopback。
-- 若由代理传递真实客户端 IP，必须配置可信代理边界；应用默认不会信任任意 `X-Forwarded-For`。
-- MySQL 3306 不得向公网开放；只允许后端宿主机或受控内网来源访问。
-
-## 数据库权限
-
-迁移账号可以执行 DDL；运行账号仅需业务表 DML。若平台允许，迁移后把后端切换到独立的最小权限账号。MySQL session 会设置 `time_zone='+00:00'`，库采用 `utf8mb4_0900_ai_ci`。
-
-## 回滚
-
-优先回滚应用镜像或原生脚本保留的上一发布，同时保持向后兼容的数据库迁移。只有确认 downgrade 不会丢数据时才执行 `alembic downgrade -1`。首迁移 downgrade 会删除全部业务表，仅可用于空测试环境，不可用于生产事故回滚。
-
-## 监控
-
-采集进程/容器重启、HTTP 5xx/409/429、数据库连接、迁移版本、refresh 重放、登录失败、同步滞后和 change feed 保留窗口。健康检查只返回状态，不包含连接串、版本密钥或内部异常。
+管理员不由应用自动创建。服务就绪后使用一次性的 `python -m scripts.create_admin` 运维命令，且不要把管理员密码写入长期环境文件。

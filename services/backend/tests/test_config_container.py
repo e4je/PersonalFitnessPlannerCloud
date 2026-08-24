@@ -10,6 +10,8 @@ from sqlalchemy.engine import make_url
 
 from app.core.config import (
     APPLICATION_DATABASE_NAME,
+    LOCAL_DATABASE_FILENAME,
+    LOCAL_JWT_SECRET_FILENAME,
     RUNTIME_CONFIG_VERSION,
     VERSION_CONTRACT,
     Settings,
@@ -34,26 +36,36 @@ def test_runtime_versions_are_loaded_from_the_vendored_contract() -> None:
     assert config.minimum_client_version == VERSION_CONTRACT["minimum_client_version"]
 
 
-def test_missing_database_and_jwt_enter_supported_first_run_mode(tmp_path: Path) -> None:
+def test_missing_database_and_jwt_create_stable_local_sqlite_defaults(tmp_path: Path) -> None:
+    runtime_path = tmp_path / "private" / "missing.json"
     config = Settings(
         _env_file=None,
         database_url="",
+        sqlite_database_path="",
         mysql_password="",
         jwt_secret="",
-        runtime_config_path=tmp_path / "missing.json",
+        runtime_config_path=runtime_path,
     )
 
-    assert config.database_url == ""
-    assert config.database_configured is False
+    parsed = make_url(config.database_url)
+    assert config.database_configured is True
+    assert parsed.drivername == "sqlite+pysqlite"
+    assert Path(parsed.database or "") == runtime_path.with_name(LOCAL_DATABASE_FILENAME)
+    assert len(config.jwt_secret) >= 32
+    assert (
+        runtime_path.with_name(LOCAL_JWT_SECRET_FILENAME).read_text(encoding="utf-8").strip()
+        == config.jwt_secret
+    )
     assert config.mysql_database == APPLICATION_DATABASE_NAME
 
 
-def test_production_can_enter_first_run_mode_without_weak_placeholder_secrets(
+def test_explicit_mysql_mode_can_enter_first_run_without_credentials(
     tmp_path: Path,
 ) -> None:
     config = Settings(
         _env_file=None,
         environment="production",
+        database_backend="mysql",
         database_url="",
         mysql_password="",
         jwt_secret="",
@@ -62,6 +74,23 @@ def test_production_can_enter_first_run_mode_without_weak_placeholder_secrets(
     )
 
     assert config.database_configured is False
+
+
+def test_production_zero_config_sqlite_uses_persisted_strong_secret(tmp_path: Path) -> None:
+    runtime_path = tmp_path / "runtime" / "backend-config.json"
+    config = Settings(
+        _env_file=None,
+        environment="production",
+        database_url="",
+        mysql_password="",
+        jwt_secret="",
+        cors_origins=["https://fitness.example.test"],
+        runtime_config_path=runtime_path,
+    )
+
+    assert make_url(config.database_url).get_backend_name() == "sqlite"
+    assert len(config.jwt_secret) >= 32
+    assert runtime_path.parent.is_dir()
 
 
 def test_partially_configured_database_still_requires_jwt(tmp_path: Path) -> None:
@@ -97,6 +126,7 @@ def test_private_runtime_config_restores_database_and_generated_jwt(tmp_path: Pa
 
     config = Settings(
         _env_file=None,
+        database_backend="sqlite",
         database_url="",
         mysql_password="",
         jwt_secret="",
@@ -152,6 +182,8 @@ def test_compose_injects_runtime_tuning_without_persistent_admin_secret() -> Non
     environment = compose["services"]["backend"]["environment"]
 
     expected = {
+        "DATABASE_BACKEND",
+        "SQLITE_DATABASE_PATH",
         "DATABASE_URL",
         "MYSQL_HOST",
         "MYSQL_PORT",
@@ -176,6 +208,8 @@ def test_compose_injects_runtime_tuning_without_persistent_admin_secret() -> Non
     assert not {"ADMIN_EMAIL", "ADMIN_PASSWORD", "ADMIN_DISPLAY_NAME"} & set(environment)
     assert environment["MYSQL_PASSWORD"] == "${MYSQL_PASSWORD:-}"
     assert environment["JWT_SECRET"] == "${JWT_SECRET:-}"
+    assert environment["DATABASE_BACKEND"] == "${DATABASE_BACKEND:-sqlite}"
+    assert environment["SQLITE_DATABASE_PATH"] == "/app-data/fitness.db"
     assert environment["RUNTIME_CONFIG_PATH"] == "/app-data/backend-config.json"
 
     mysql_environment = compose["services"]["mysql"]["environment"]
@@ -188,7 +222,7 @@ def test_compose_injects_runtime_tuning_without_persistent_admin_secret() -> Non
     assert "/health/live" in " ".join(compose["services"]["backend"]["healthcheck"]["test"])
 
     env_example = (backend_root / ".env.example").read_text(encoding="utf-8")
-    assert "MYSQL_HOST=mysql" in env_example
+    assert "DATABASE_BACKEND=sqlite" in env_example
 
     alembic = (backend_root / "alembic.ini").read_text(encoding="utf-8")
     assert "sqlalchemy.url =\n" in alembic
@@ -198,6 +232,7 @@ def test_compose_injects_runtime_tuning_without_persistent_admin_secret() -> Non
     assert "ADMIN_PASSWORD" not in entrypoint
     assert "scripts.runtime_status" in entrypoint
     assert "scripts.wait_for_database" in entrypoint
+    assert "umask 077" in entrypoint
 
     dockerfile = (backend_root / "Dockerfile").read_text(encoding="utf-8")
     assert '"--workers", "1"' in dockerfile
@@ -224,6 +259,8 @@ def test_repository_compose_exposes_the_same_first_run_safety_contract() -> None
     assert mysql["environment"]["MYSQL_DATABASE"] == APPLICATION_DATABASE_NAME
     assert "ports" not in mysql
     assert "depends_on" not in backend
+    assert backend["environment"]["DATABASE_BACKEND"] == "${DATABASE_BACKEND:-sqlite}"
+    assert backend["environment"]["SQLITE_DATABASE_PATH"] == "/app-data/fitness.db"
     assert backend["environment"]["MYSQL_DATABASE"] == APPLICATION_DATABASE_NAME
     assert backend["environment"]["RUNTIME_CONFIG_PATH"] == "/app-data/backend-config.json"
     assert backend["volumes"] == ["backend_config:/app-data"]

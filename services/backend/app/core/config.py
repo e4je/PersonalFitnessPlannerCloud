@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -21,6 +23,8 @@ _PLACEHOLDER_TOKENS = (
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APPLICATION_DATABASE_NAME = "fitness"
 RUNTIME_CONFIG_VERSION = 1
+LOCAL_DATABASE_FILENAME = "fitness.db"
+LOCAL_JWT_SECRET_FILENAME = "jwt-secret"
 
 
 def _discover_env_files(backend_root: Path) -> tuple[str, ...]:
@@ -93,6 +97,46 @@ def build_mysql_database_url(
     ).render_as_string(hide_password=False)
 
 
+def build_sqlite_database_url(path: Path) -> str:
+    """Build an absolute SQLite URL without hand-escaping platform paths."""
+
+    resolved_path = path.expanduser()
+    if not resolved_path.is_absolute():
+        resolved_path = (_BACKEND_ROOT / resolved_path).resolve()
+    return URL.create(
+        drivername="sqlite+pysqlite",
+        database=str(resolved_path),
+    ).render_as_string(hide_password=False)
+
+
+def _load_or_create_local_jwt_secret(path: Path) -> str:
+    """Persist a stable signing key for the zero-configuration SQLite mode."""
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.is_file():
+            secret = path.read_text(encoding="utf-8").strip()
+        else:
+            secret = secrets.token_urlsafe(48)
+            try:
+                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                secret = path.read_text(encoding="utf-8").strip()
+            else:
+                with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                    stream.write(secret + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+        if len(secret) < 32 or _is_placeholder(secret):
+            raise ValueError("stored JWT secret is invalid")
+        os.chmod(path, 0o600)
+        return secret
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"Cannot securely persist the local JWT signing key: {path}"
+        ) from exc
+
+
 def _load_version_contract() -> dict[str, str]:
     path = Path(__file__).resolve().parents[2] / "contracts" / "schema-version.json"
     try:
@@ -134,10 +178,13 @@ class Settings(BaseSettings):
     api_version: str = VERSION_CONTRACT["api_version"]
     schema_version: str = VERSION_CONTRACT["schema_version"]
     minimum_client_version: str = VERSION_CONTRACT["minimum_client_version"]
-    # DATABASE_URL is an optional escape hatch for managed databases and tests.
-    # When it is empty, build it from discrete fields so reserved characters in
-    # MYSQL_PASSWORD are percent-encoded instead of being parsed as URL syntax.
+    # SQLite is the zero-configuration default. Set DATABASE_BACKEND=mysql to
+    # retain the optional first-run MySQL wizard, or provide DATABASE_URL for a
+    # fully explicit connection. Existing private MySQL runtime configs continue
+    # to take precedence so upgrades never silently abandon server data.
+    database_backend: Literal["sqlite", "mysql"] = "sqlite"
     database_url: str = Field(default="", repr=False)
+    sqlite_database_path: Path | None = None
     mysql_host: str = "127.0.0.1"
     mysql_port: int = Field(default=3306, ge=1, le=65535)
     mysql_user: str = "fitness"
@@ -177,6 +224,13 @@ class Settings(BaseSettings):
             return [part.strip() for part in value.split(",") if part.strip()]
         return value
 
+    @field_validator("sqlite_database_path", mode="before")
+    @classmethod
+    def parse_optional_sqlite_database_path(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def resolve_database_url_and_validate_production(self) -> "Settings":
         configured_versions = {
@@ -190,6 +244,7 @@ class Settings(BaseSettings):
             )
         explicit_database_url = self.database_url.strip()
         runtime_config = _load_runtime_config(self.runtime_config_path)
+        runtime_database_loaded = False
         if runtime_config is not None and not self.jwt_secret.strip():
             self.jwt_secret = str(runtime_config["jwt_secret"])
         if runtime_config is not None and not explicit_database_url and not self.mysql_password:
@@ -200,9 +255,18 @@ class Settings(BaseSettings):
             self.mysql_user = str(database["username"])
             self.mysql_password = str(database["password"])
             self.mysql_database = APPLICATION_DATABASE_NAME
+            runtime_database_loaded = True
 
         explicit_database_url = self.database_url.strip()
-        if not explicit_database_url and self.mysql_password:
+        legacy_mysql_environment = (
+            bool(self.mysql_password)
+            and "database_backend" not in self.model_fields_set
+        )
+        if not explicit_database_url and self.mysql_password and (
+            runtime_database_loaded
+            or self.database_backend == "mysql"
+            or legacy_mysql_environment
+        ):
             self.database_url = build_mysql_database_url(
                 host=self.mysql_host,
                 port=self.mysql_port,
@@ -210,13 +274,46 @@ class Settings(BaseSettings):
                 password=self.mysql_password,
                 database=self.mysql_database,
             )
+        elif not explicit_database_url and self.database_backend == "sqlite":
+            local_database_path = self.sqlite_database_path or self.runtime_config_path.with_name(
+                LOCAL_DATABASE_FILENAME
+            )
+            self.sqlite_database_path = local_database_path
+            self.database_url = build_sqlite_database_url(local_database_path)
         elif not explicit_database_url:
-            # An empty URL is the supported first-run state. The process can
-            # serve liveness, the Web wizard and setup endpoints without MySQL.
+            # Explicit MySQL mode keeps the secured first-run Web wizard
+            # available for operators who do not want the local SQLite file.
             self.database_url = ""
             self.mysql_database = APPLICATION_DATABASE_NAME
 
         database_configured = bool(self.database_url.strip())
+        configured_url = make_url(self.database_url) if database_configured else None
+        if configured_url is not None and configured_url.get_backend_name() not in {
+            "mysql",
+            "sqlite",
+        }:
+            raise ValueError("DATABASE_URL must use MySQL or SQLite")
+        if configured_url is not None and configured_url.get_backend_name() == "sqlite":
+            database_path = configured_url.database
+            if not database_path:
+                raise ValueError("SQLite DATABASE_URL must identify a database file")
+            if database_path != ":memory:" and not database_path.startswith("file:"):
+                try:
+                    Path(database_path).expanduser().parent.mkdir(
+                        parents=True,
+                        exist_ok=True,
+                        mode=0o700,
+                    )
+                except OSError as exc:
+                    raise ValueError("SQLite database directory is not writable") from exc
+        if (
+            configured_url is not None
+            and configured_url.get_backend_name() == "sqlite"
+            and not self.jwt_secret.strip()
+        ):
+            self.jwt_secret = _load_or_create_local_jwt_secret(
+                self.runtime_config_path.with_name(LOCAL_JWT_SECRET_FILENAME)
+            )
         if database_configured and not self.jwt_secret.strip():
             raise ValueError("JWT_SECRET must be provided when the database is configured")
         if self.environment == "production":
@@ -224,8 +321,7 @@ class Settings(BaseSettings):
                 len(self.jwt_secret) < 32 or _is_placeholder(self.jwt_secret)
             ):
                 raise ValueError("JWT_SECRET must be a strong, non-default value in production")
-            if database_configured:
-                configured_url = make_url(self.database_url)
+            if configured_url is not None and configured_url.get_backend_name() == "mysql":
                 database_password = configured_url.password
                 database_username = configured_url.username
                 if database_password is None or _is_placeholder(

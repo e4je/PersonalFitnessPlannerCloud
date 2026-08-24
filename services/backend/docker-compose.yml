@@ -36,6 +36,8 @@ services:
     restart: unless-stopped
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
+      SQLITE_DATABASE_PATH: /app-data/fitness.db
       DATABASE_URL: ${DATABASE_URL:-}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}

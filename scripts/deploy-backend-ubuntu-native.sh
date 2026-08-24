@@ -53,8 +53,8 @@ usage() {
   -h, --help              显示帮助
 
 本脚本不安装或使用 Docker。它以 Python 3.12 虚拟环境、systemd、Nginx 和
-Certbot 部署单个后端进程。MySQL 地址和密码仍通过首次 HTTPS Web 向导填写，
-数据库名固定为 fitness。
+Certbot 部署单个后端进程。本地 SQLite 数据库、表结构、JWT 密钥和默认训练
+计划会自动初始化，不需要安装或配置 MySQL。
 EOF
 }
 
@@ -358,6 +358,9 @@ prepare_environment_file() {
 # Managed by PersonalFitnessPlannerCloud native deploy script.
 PFP_NATIVE_DEPLOY_DOMAIN=$DOMAIN
 ENVIRONMENT=production
+DATABASE_BACKEND=sqlite
+SQLITE_DATABASE_PATH=$DATA_DIR/fitness.db
+JWT_SECRET=
 RUNTIME_CONFIG_PATH=$DATA_DIR/backend-config.json
 CORS_ORIGINS='["https://$DOMAIN"]'
 FORWARDED_ALLOW_IPS=127.0.0.1,::1
@@ -416,8 +419,10 @@ prepare_release() {
   log "校验后端可导入"
   (
     cd "$APP_NEW_DIR"
-    ENVIRONMENT=production \
+    runuser -u "$SERVICE_USER" -- env \
+      ENVIRONMENT=production \
       RUNTIME_CONFIG_PATH="$DATA_DIR/backend-config.json" \
+      JWT_SECRET= \
       CORS_ORIGINS="[\"https://$DOMAIN\"]" \
       PYTHONDONTWRITEBYTECODE=1 \
       "$VENV_NEW_DIR/bin/python" -c 'from app.main import app; assert app.title'
@@ -437,6 +442,8 @@ User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
+ExecStartPre=$VENV_DIR/bin/python -m alembic upgrade head
+ExecStartPre=$VENV_DIR/bin/python -m scripts.seed_default_plan
 ExecStart=$VENV_DIR/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1,::1
 Restart=on-failure
 RestartSec=5s
@@ -569,33 +576,25 @@ request_certificate() {
 }
 
 print_result() {
-  local ready_code setup_token=""
+  local ready_code
   ready_code="$(
     curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
       http://127.0.0.1:8000/health/ready || true
   )"
-  if [[ -f "$DATA_DIR/setup-token" ]]; then
-    setup_token="$(tr -d '\r\n' < "$DATA_DIR/setup-token")"
-  fi
 
   printf '\n============================================================\n'
   printf 'Ubuntu 原生后端部署完成：%s\n' "https://$DOMAIN"
   printf 'Web 控制台：%s\n' "https://$DOMAIN/web/"
   printf 'systemd 服务：%s\n' "$SERVICE_NAME"
-  printf '运行配置：%s\n' "$DATA_DIR/backend-config.json"
+  printf '本地数据库：%s\n' "$DATA_DIR/fitness.db"
+  printf 'JWT 密钥文件：%s\n' "$DATA_DIR/jwt-secret"
   if [[ "$ready_code" == "200" ]]; then
-    printf '数据库状态：已配置，readiness 检查通过。\n'
+    printf '数据库状态：SQLite 已自动初始化，readiness 检查通过。\n'
   else
-    printf '数据库状态：等待首次配置（readiness 返回 %s，这是正常状态）。\n' \
+    printf '数据库状态：异常（readiness 返回 %s），请检查 systemd 日志。\n' \
       "${ready_code:-unknown}"
-    if [[ -n "$setup_token" ]]; then
-      printf '一次性 setup_token：%s\n' "$setup_token"
-    else
-      printf '未读取到 setup_token，请运行：journalctl -u %s -n 100\n' "$SERVICE_NAME"
-    fi
-    printf '请在 HTTPS Web 页面填写 MySQL 地址、账号和密码。\n'
   fi
-  printf '数据库名固定为 fitness；MySQL 地址由宿主机进程直接访问。\n'
+  printf '请只开放 Web 的 80/443；无需开放数据库端口。\n'
   printf '============================================================\n'
 
   if ! curl -fsS --max-time 15 "https://$DOMAIN/health/live" >/dev/null; then

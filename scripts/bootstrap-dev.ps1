@@ -25,12 +25,8 @@ function New-RandomBase64Secret {
 }
 
 if (-not (Test-Path -LiteralPath $envPath)) {
-    $mysqlPassword = New-RandomBase64Secret -ByteCount 36
-    $rootPassword = New-RandomBase64Secret -ByteCount 36
     $jwtSecret = New-RandomBase64Secret -ByteCount 48
     $content = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".env.example")
-    $content = $content -replace "(?m)^MYSQL_PASSWORD=$", "MYSQL_PASSWORD=$mysqlPassword"
-    $content = $content -replace "(?m)^MYSQL_ROOT_PASSWORD=$", "MYSQL_ROOT_PASSWORD=$rootPassword"
     $content = $content -replace "(?m)^JWT_SECRET=$", "JWT_SECRET=$jwtSecret"
     [IO.File]::WriteAllText($envPath, $content, [Text.UTF8Encoding]::new($false))
     Write-Host "Created root .env with random local-only secrets."
@@ -55,7 +51,7 @@ if (-not $SkipPythonEnvironment) {
 )
 
 if (-not $NoStart) {
-    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") --profile bundled-db up -d --build
+    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") up -d --build backend
     if ($LASTEXITCODE -ne 0) { throw "Docker Compose startup failed" }
-    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") --profile bundled-db ps
+    & docker compose --env-file (Join-Path $repoRoot ".env") -f (Join-Path $repoRoot "infra/docker-compose.yml") ps backend
 }

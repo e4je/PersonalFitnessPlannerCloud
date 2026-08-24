@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from pathlib import Path
 from threading import RLock
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
@@ -13,10 +15,15 @@ def build_engine(database_url: str | None = None) -> Engine:
     url = database_url or settings.database_url
     if not url:
         raise DatabaseNotConfiguredError("Database setup has not been completed")
+    parsed_url = make_url(url)
     connect_args: dict[str, object] = {}
-    if url.startswith("sqlite"):
+    if parsed_url.get_backend_name() == "sqlite":
+        database_path = parsed_url.database
+        if database_path and database_path != ":memory:" and not database_path.startswith("file:"):
+            Path(database_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         connect_args["check_same_thread"] = False
-    elif url.startswith("mysql+pymysql"):
+        connect_args["timeout"] = 10
+    elif parsed_url.drivername == "mysql+pymysql":
         connect_args["connect_timeout"] = 10
 
     engine = create_engine(
@@ -38,10 +45,15 @@ def build_engine(database_url: str | None = None) -> Engine:
 
     if engine.dialect.name == "sqlite":
         @event.listens_for(engine, "connect")
-        def enable_sqlite_foreign_keys(dbapi_connection: object, _connection_record: object) -> None:
+        def configure_sqlite_connection(
+            dbapi_connection: object,
+            _connection_record: object,
+        ) -> None:
             cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
             try:
                 cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA busy_timeout=10000")
+                cursor.execute("PRAGMA journal_mode=WAL")
             finally:
                 cursor.close()
     return engine

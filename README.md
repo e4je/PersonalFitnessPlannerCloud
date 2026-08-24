@@ -26,9 +26,9 @@
 PersonalFitnessPlannerCloud/
 ├─ apps/android/       Android 客户端（Kotlin、Jetpack Compose、Room）
 ├─ apps/windows/       Windows 客户端（.NET 10、WPF、SQLite）
-├─ services/backend/   云同步服务（FastAPI、SQLAlchemy、Alembic、MySQL 8）
+├─ services/backend/   云同步服务（FastAPI、SQLAlchemy、Alembic、SQLite）
 ├─ contracts/          OpenAPI、默认计划和跨端规则测试数据
-├─ infra/              Docker Compose 与 MySQL 配置
+├─ infra/              可选的 Docker Compose 配置
 ├─ scripts/            测试、构建和打包脚本
 └─ docs/               架构、安全、测试和构建说明
 ```
@@ -64,7 +64,7 @@ git push origin v1.0.0
 
 ## 不使用 Docker 部署后端
 
-已有外部 MySQL 8 时，可以直接原生部署后端，不需要 Docker。
+后端默认使用服务器本机的 SQLite 文件，不需要安装 MySQL 或 Docker。部署脚本会自动创建数据库、执行迁移、写入默认训练计划，并生成持久化 JWT 密钥。
 
 Ubuntu 脚本使用 Python 3.12 虚拟环境和 systemd，并自动配置 Nginx 与 Let's Encrypt：
 
@@ -79,10 +79,11 @@ Windows 可以安装为受限 `LOCAL SERVICE` 账号运行的开机计划任务�
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\deploy-backend-windows.ps1 `
-  -LocalOnly
+  -LocalOnly `
+  -Port 18000
 ```
 
-Windows 公网模式改用 `-Domain fitness.example.com`，并让同机 Caddy、IIS 或已有网关提供 HTTPS。两个脚本都只监听 loopback、保留上一次发布、复用私有运行数据，并在最后显示首次数据库配置所需的 `setup_token`。数据库账号和密码只在 Web 向导中提交，数据库名固定为 `fitness`。完整步骤见[非 Docker 部署说明](docs/native-backend-deployment.md)。
+Windows 公网模式改用 `-Domain fitness.example.com`，并让同机 Caddy、IIS 或已有网关提供 HTTPS。两个脚本都只监听 loopback、保留上一次发布并复用私有运行数据。部署完成后直接打开 `/web/` 注册或登录，不再填写数据库地址、账号或密码。完整步骤见[非 Docker 部署说明](docs/native-backend-deployment.md)。
 
 仍希望使用容器时，原来的 Ubuntu Docker 自动部署入口继续保留：
 
@@ -96,35 +97,40 @@ Docker 版本说明见 [Ubuntu Docker 部署说明](docs/ubuntu-backend-deployme
 
 ## 本地启动云同步服务
 
-只有需要仓库内置 MySQL 时才必须使用 Docker。容器化本地启动脚本会生成不提交到 Git 的 `.env`，写入随机数据库密码和 JWT 密钥，并启用 `bundled-db` profile：
+Docker 也默认使用 SQLite。启动脚本会生成不提交到 Git 的 `.env` 和随机 JWT 密钥，只启动 backend：
 
 ```powershell
 .\scripts\bootstrap-dev.ps1
 ```
 
-也可以手动复制 `.env.example`，填写必要配置后启动内置 MySQL：
+也可以手动复制 `.env.example` 后启动：
 
 ```powershell
-docker compose --env-file .env -f infra/docker-compose.yml --profile bundled-db up -d --build
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build backend
 ```
 
-如果已有 MySQL 8，也可以不配置数据库变量，先只启动后端：
-
-```powershell
-docker compose -f infra/docker-compose.yml up -d --build backend
-docker compose -f infra/docker-compose.yml logs backend
-```
-
-然后打开 `http://127.0.0.1:8000/web/`。首次启动页面会要求填写 MySQL 地址、端口、账号、密码，以及日志中的一次性 `setup_token`。数据库名固定为 `fitness`：不存在时后端创建，已存在时读取版本和表信息，再自动运行 Alembic 与默认计划 seed。连接账号需要具备创建 `fitness`（若尚不存在）、升级表结构和读写业务表的权限。远程部署必须先配置 HTTPS，再在页面提交数据库凭据。
+然后打开 `http://127.0.0.1:8000/web/`。首次启动会自动创建 `fitness.db`、执行 Alembic 迁移和幂等 seed；页面会直接进入注册/登录。
 
 默认情况下：
 
-- API 监听 `http://127.0.0.1:8000`。
-- MySQL 只在 Docker 内部网络中开放，不映射到宿主机。
-- 数据保存在 Docker volume `personal_fitness_planner_mysql_data` 中。
-- 首次页面生成的数据库连接与 JWT 密钥保存在 `personal_fitness_planner_backend_config` 私有 volume 中。
+- API 只监听 `http://127.0.0.1:8000`。
+- SQLite 数据库和自动生成的 JWT 密钥保存在私有数据目录；Docker 使用 `personal_fitness_planner_backend_config` volume。
+- SQLite 没有需要映射的数据库端口。公网只开放反向代理的 80/443，不要共享或直接暴露 `fitness.db`。
 
-部署完成后可打开 `https://<你的域名>/web/` 使用 Web 控制台。首次数据库配置完成后，页面会进入注册/登录；再按后端文档创建超级管理员。管理员可以在“系统设置”关闭公开注册，也可以在“账号管理”创建普通账号、停用账号或重置密码。数据库凭据只在首次设置时通过同源 HTTPS 提交，页面不会保存，Android/Windows 客户端也不会接触这些凭据。
+已有 MySQL 8 的旧部署仍受支持。设置 `DATABASE_BACKEND=mysql` 后，可填写 `MYSQL_*` 或使用原有首次配置向导；显式 `DATABASE_URL` 也继续可用。新部署无需配置这些变量。
+
+部署完成后可打开 `https://<你的域名>/web/` 使用 Web 控制台，再按后端文档创建超级管理员。管理员可以在“系统设置”关闭公开注册，也可以在“账号管理”创建普通账号、停用账号或重置密码。Android/Windows 客户端只连接后端 API，不会接触数据库文件或数据库凭据。
+
+### 备份本地云端数据
+
+SQLite 模式支持运行中一致性备份，无需停止后端：
+
+```powershell
+cd services\backend
+.\.venv\Scripts\python.exe -m scripts.backup_sqlite --output "D:\backup\fitness.db"
+```
+
+Windows 原生安装的实时数据库位于 `C:\ProgramData\PersonalFitnessPlannerCloud\data\fitness.db`；Ubuntu 原生安装位于 `/var/lib/personal-fitness-planner/fitness.db`。恢复时先停止计划任务或 systemd 服务，保留当前文件的副本，再用备份替换 `fitness.db`，最后重新启动并检查 `/health/ready`。必须同时保留 `jwt-secret`，否则所有设备需要重新登录。
 
 这个 HTTP 地址适合浏览器、接口调试工具和同机运行的 Windows 客户端。Android 客户端只接受 HTTPS，即使是 Debug APK 或 `localhost` 也不会放行明文 HTTP。若要让 Android 连接自建后端，需要在 API 前配置带可信证书的 HTTPS 反向代理，并在应用中填写对应的 HTTPS 地址。
 
@@ -213,7 +219,7 @@ GitHub Actions 当前会执行：
 
 ## 数据与隐私
 
-- 客户端不会直接连接 MySQL，也不会保存数据库账号。
+- 客户端不会直接连接 SQLite/MySQL，也不会保存数据库配置。
 - 本地训练数据默认只保存在当前设备；启用云同步后才会上传到自己部署的后端。
 - `.env`、Android `local.properties`、签名文件、数据库文件和构建产物均已加入 `.gitignore`。
 - 不要把真实密码、JWT 密钥、Android 签名文件或个人训练数据库提交到 Git。

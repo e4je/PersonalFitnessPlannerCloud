@@ -14,12 +14,8 @@ random_secret() {
 
 if [ ! -f "$env_path" ]; then
   umask 077
-  mysql_password=$(random_secret)
-  root_password=$(random_secret)
   jwt_secret=$(random_secret)
   sed \
-    -e "s|^MYSQL_PASSWORD=$|MYSQL_PASSWORD=$mysql_password|" \
-    -e "s|^MYSQL_ROOT_PASSWORD=$|MYSQL_ROOT_PASSWORD=$root_password|" \
     -e "s|^JWT_SECRET=$|JWT_SECRET=$jwt_secret|" \
     "$repo_root/.env.example" > "$env_path"
   printf '%s\n' "Created root .env with random local-only secrets."
@@ -55,5 +51,5 @@ do
 done
 "$venv_python" "$repo_root/scripts/validate_contracts.py"
 
-docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" --profile bundled-db up -d --build
-docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" --profile bundled-db ps
+docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" up -d --build backend
+docker compose --env-file "$env_path" -f "$repo_root/infra/docker-compose.yml" ps backend

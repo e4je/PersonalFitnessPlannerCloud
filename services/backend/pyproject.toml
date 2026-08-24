@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "personal-fitness-planner-backend"
 version = "0.1.0"
-description = "FastAPI and MySQL backend for Personal Fitness Planner"
+description = "FastAPI backend with local SQLite and optional MySQL for Personal Fitness Planner"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "alembic>=1.16,<2",
