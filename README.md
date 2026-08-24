@@ -54,17 +54,37 @@ git tag -a v1.0.0 -m "v1.0.0"
 git push origin v1.0.0
 ```
 
-tag 会触发同一套 CI，但不会自动创建 GitHub Release，也不会自动修改应用内部版本号。
+符合 `v1.2.3` 或 `1.2.3` 格式的 tag 还会触发独立的 Release workflow；检查全部通过后，GitHub Release 会附带 APK、Windows EXE 和 SHA-256 清单。tag 不会自动修改应用内部版本号。
 
 ### 安装提示
 
 - Android 产物是 Debug APK，适合个人安装。如果手机上已经安装了签名不同的同包名应用，需要先卸载旧版本。
 - Windows EXE 是 `win-x64` 自包含程序，不需要预装 .NET Runtime；因为没有代码签名，首次运行时 Windows 可能显示 SmartScreen 提示。
-- Actions 构建产物来自私有仓库，只有有权限的 GitHub 账号可以下载。
+- Actions 构建产物需要从对应任务页面下载；语义版本 tag 的长期产物也可以直接从仓库的 Releases 页面下载。
 
-## Ubuntu 服务器自动部署
+## 不使用 Docker 部署后端
 
-已有外部 MySQL 8 时，可以在单台 Ubuntu 22.04、24.04 或 26.04 服务器上运行自动部署脚本。先让域名解析到服务器，并开放 80/443：
+已有外部 MySQL 8 时，可以直接原生部署后端，不需要 Docker。
+
+Ubuntu 脚本使用 Python 3.12 虚拟环境和 systemd，并自动配置 Nginx 与 Let's Encrypt：
+
+```bash
+sudo bash scripts/deploy-backend-ubuntu-native.sh \
+  --domain fitness.example.com \
+  --email admin@example.com
+```
+
+Windows 可以安装为受限 `LOCAL SERVICE` 账号运行的开机计划任务。本机个人使用：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\deploy-backend-windows.ps1 `
+  -LocalOnly
+```
+
+Windows 公网模式改用 `-Domain fitness.example.com`，并让同机 Caddy、IIS 或已有网关提供 HTTPS。两个脚本都只监听 loopback、保留上一次发布、复用私有运行数据，并在最后显示首次数据库配置所需的 `setup_token`。数据库账号和密码只在 Web 向导中提交，数据库名固定为 `fitness`。完整步骤见[非 Docker 部署说明](docs/native-backend-deployment.md)。
+
+仍希望使用容器时，原来的 Ubuntu Docker 自动部署入口继续保留：
 
 ```bash
 sudo bash scripts/deploy-backend-ubuntu.sh \
@@ -72,13 +92,11 @@ sudo bash scripts/deploy-backend-ubuntu.sh \
   --email admin@example.com
 ```
 
-脚本会检测并安装缺失的 Docker Engine/Compose、Nginx 和 Certbot，构建一个 backend 实例、配置可信 HTTPS，并在最后显示首次数据库配置所需的 `setup_token`。数据库账号和密码不写入命令行或 Git，而是在 `https://<你的域名>/web/` 中提交；数据库名固定为 `fitness`。
-
-脚本可重复运行。更新时先 `git pull --ff-only origin main`，再用相同参数重新执行；生产环境文件保存在 `/etc/personal-fitness-planner/backend.env`，数据库连接和自动生成的 JWT 密钥保存在私有 Docker volume 中。完整步骤、管理员创建和故障排查见 [Ubuntu 单服务器部署说明](docs/ubuntu-backend-deployment.md)。
+Docker 版本说明见 [Ubuntu Docker 部署说明](docs/ubuntu-backend-deployment.md)。
 
 ## 本地启动云同步服务
 
-需要 Docker Engine 和 Docker Compose。仓库内置 MySQL 的最省事启动方式是运行下面的脚本；它会生成不提交到 Git 的 `.env`，写入随机数据库密码和 JWT 密钥，并启用 `bundled-db` profile：
+只有需要仓库内置 MySQL 时才必须使用 Docker。容器化本地启动脚本会生成不提交到 Git 的 `.env`，写入随机数据库密码和 JWT 密钥，并启用 `bundled-db` profile：
 
 ```powershell
 .\scripts\bootstrap-dev.ps1

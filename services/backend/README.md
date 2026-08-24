@@ -35,9 +35,25 @@ backend/
 
 ## 快速启动
 
-要求：Docker Engine 与 Compose 插件可用。
+后端既可以原生运行，也可以使用 Docker。已有外部 MySQL 8 时，Ubuntu 单服务器推荐直接从仓库根运行非 Docker 脚本：
 
-Ubuntu 单服务器生产部署可直接从仓库根运行：
+```bash
+sudo bash scripts/deploy-backend-ubuntu-native.sh \
+  --domain fitness.example.com \
+  --email admin@example.com
+```
+
+Windows 本机使用可以在管理员 PowerShell 中安装为开机任务：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\deploy-backend-windows.ps1 `
+  -LocalOnly
+```
+
+Windows 公网模式使用 `-Domain fitness.example.com`，并通过 Caddy、IIS 或现有 HTTPS 网关代理到 loopback。完整说明见仓库根的 `docs/native-backend-deployment.md`。
+
+Ubuntu Docker 生产部署入口仍然可用：
 
 ```bash
 sudo bash scripts/deploy-backend-ubuntu.sh \
@@ -45,7 +61,7 @@ sudo bash scripts/deploy-backend-ubuntu.sh \
   --email admin@example.com
 ```
 
-脚本会安装缺失依赖、启动单个 backend、配置 Nginx/Let's Encrypt，并输出首次向导令牌。详细说明见仓库根的 `docs/ubuntu-backend-deployment.md`。
+脚本会安装缺失的 Docker 依赖、启动单个 backend、配置 Nginx/Let's Encrypt，并输出首次向导令牌。详细说明见仓库根的 `docs/ubuntu-backend-deployment.md`。
 
 ### 已有 MySQL：首次 Web 向导
 

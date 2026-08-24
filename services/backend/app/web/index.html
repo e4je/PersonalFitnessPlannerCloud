@@ -39,12 +39,12 @@
           </div>
           <form id="setup-form" class="form-stack" novalidate>
             <div class="form-grid setup-form-grid">
-              <label>MySQL 地址<input name="host" autocomplete="off" required maxlength="255" aria-describedby="setup-host-hint"><span id="setup-host-hint" class="field-hint">内置容器填 mysql；外部数据库填主机名或 IP，不含 http://</span></label>
+              <label>MySQL 地址<input name="host" autocomplete="off" required maxlength="255" aria-describedby="setup-host-hint"><span id="setup-host-hint" class="field-hint">填写后端所在机器能够访问的主机名或 IP，不含 http://；使用内置容器时填 mysql</span></label>
               <label>端口<input name="port" type="number" inputmode="numeric" value="3306" required min="1" max="65535"></label>
             </div>
             <label>数据库账号<input name="username" autocomplete="username" required maxlength="128"></label>
             <label>数据库密码<input name="password" type="password" autocomplete="off" required maxlength="1024"></label>
-            <label>一次性初始化码<input name="setup_token" type="password" autocomplete="off" required maxlength="512" aria-describedby="setup-token-hint"><span id="setup-token-hint" class="field-hint">在服务器执行 <code>docker compose logs backend</code>，查找 setup_token。</span></label>
+            <label>一次性初始化码<input name="setup_token" type="password" autocomplete="off" required maxlength="512" aria-describedby="setup-token-hint"><span id="setup-token-hint" class="field-hint">从部署脚本的完成信息或后端服务日志中复制 <code>setup_token</code>。</span></label>
             <div class="setup-notice">数据库名已固定为 <code>fitness</code>，页面不会接收其他库名。</div>
             <button id="setup-submit" class="button button-primary" type="submit">检查并初始化数据库</button>
           </form>

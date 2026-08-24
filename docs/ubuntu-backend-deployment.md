@@ -12,16 +12,16 @@
 - 一个用于 Let's Encrypt 通知的真实邮箱。
 - 公网允许访问 TCP 80 和 443。
 - 后端容器可以访问的 MySQL 8 地址。MySQL 应位于内网、VPC 或 VPN，不应向公网开放 3306。
-- 私有仓库的 SSH Deploy Key、GitHub SSH 密钥或其他只读拉取凭据。
+- 能通过 HTTPS 访问公开 GitHub 仓库；只读克隆不需要 GitHub SSH Key。
 
 如果 MySQL 与 Docker 位于同一台服务器，首次向导中不能填写 `127.0.0.1`，因为该地址在容器中指向容器自身。应使用容器能够访问的宿主机地址，并让 MySQL 仅监听受控接口、通过防火墙限制来源。
 
 ## 首次部署
 
-先拉取私有仓库：
+先通过 HTTPS 拉取公开仓库：
 
 ```bash
-git clone git@github.com:e4je/PersonalFitnessPlannerCloud.git
+git clone https://github.com/e4je/PersonalFitnessPlannerCloud.git
 cd PersonalFitnessPlannerCloud
 git switch main
 ```

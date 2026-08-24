@@ -14,23 +14,25 @@ sudo bash scripts/deploy-backend-ubuntu.sh \
 
 重复运行会保留 `personal_fitness_planner_backend_config` volume 并重新构建当前代码。更新前必须备份数据库；不得运行 `docker compose down -v`。完整前置条件、管理员创建、更新和排错步骤见仓库根的 `docs/ubuntu-backend-deployment.md`。
 
+不使用 Docker 时，Ubuntu 可运行 `scripts/deploy-backend-ubuntu-native.sh`，以 Python 3.12 虚拟环境、systemd、Nginx 和 Certbot 部署；Windows 可运行 `scripts/deploy-backend-windows.ps1`，安装为仅监听 loopback 的开机任务。两个原生脚本都保留独立数据目录和上一版本。完整说明见仓库根的 `docs/native-backend-deployment.md`。
+
 ## 环境分层
 
 开发、测试、生产必须使用不同数据库与 JWT 密钥。生产设置 `ENVIRONMENT=production` 后，应用会拒绝默认 JWT secret 和通配 CORS，并强制 HTTPS 重定向。若 TLS 在反向代理终止，代理必须正确传递协议头并只允许可信来源访问应用端口。
 
 ## 首次数据库配置
 
-后端没有 `DATABASE_URL`/`MYSQL_PASSWORD` 且没有 `/app-data/backend-config.json` 时会进入 setup mode，而不是退出：
+后端没有 `DATABASE_URL`/`MYSQL_PASSWORD` 且运行配置路径中没有 `backend-config.json` 时会进入 setup mode，而不是退出：
 
 - `/health/live` 返回 200；`/health/ready` 返回 503 `setup_required`。
 - `/web/` 与 `GET/POST /api/v1/setup/*` 可访问，其他业务 API 返回 503。
 - 启动日志会打印一次性 `setup_token`；令牌保存在私有运行目录，重启后仍一致，初始化完成后失效。
 - Web 只收 MySQL host、port、username、password；数据库名由代码固定为 `fitness`。
-- 后端识别或创建库，执行 Alembic 与幂等 seed，最后原子写入 `/app-data/backend-config.json` 并切换数据库会话。
+- 后端识别或创建库，执行 Alembic 与幂等 seed，最后原子写入私有运行配置并切换数据库会话。Compose 的路径为 `/app-data/backend-config.json`，原生脚本使用操作系统受限数据目录。
 
-首次配置必须只运行一个 backend 容器，并先完成可信 HTTPS/TLS 终止；不要通过公网 HTTP 发送数据库凭据。初始化账号需要创建库、DDL 和业务 DML 权限。完成后可按平台能力切换到单独的最小权限运行账号，但必须保证后续发布迁移仍由受控迁移任务执行。
+首次配置必须只运行一个 backend 实例，并先完成可信 HTTPS/TLS 终止；不要通过公网 HTTP 发送数据库凭据。初始化账号需要创建库、DDL 和业务 DML 权限。完成后可按平台能力切换到单独的最小权限运行账号，但必须保证后续发布迁移仍由受控迁移任务执行。
 
-运行配置文件包含数据库密码和自动生成的 JWT 密钥。官方 Compose 通过 `backend_config` 命名 volume 持久化；该 volume 只能由 backend 服务账号访问，不应进入代码仓库、普通日志或公开备份。
+运行配置文件包含数据库密码和自动生成的 JWT 密钥。官方 Compose 通过 `backend_config` 命名 volume 持久化；原生脚本将文件放在仅服务账号和管理员可读的数据目录。两者都不应进入代码仓库、普通日志或公开备份。
 
 ## 发布流程
 
@@ -43,9 +45,9 @@ sudo bash scripts/deploy-backend-ubuntu.sh \
 7. 执行 `python -m scripts.smoke_test`，核对登录、bootstrap、同步和注销。
 8. 在受控浏览器访问 `/web/`，用超级管理员验证账号管理、注册开关和计划草稿流程；不要把该地址暴露给不受信任的访客。
 
-已有数据库配置时，Compose 入口脚本适合单机：它会自动迁移和 seed；未配置时则直接启动首次向导。多副本生产环境应先用单实例完成初始化，再将 `RUN_MIGRATIONS=0`、`RUN_SEED=0`，改由唯一发布任务完成，避免多个副本争用迁移锁。
+已有数据库配置时，Compose 入口脚本会自动迁移和 seed；原生部署更新则复用已初始化的数据目录和当前数据库结构。未配置时两种方式都会启动首次向导，由向导完成迁移与 seed。多副本生产环境应先用单实例完成初始化，再改由唯一发布任务执行迁移，避免多个副本争用迁移锁。
 
-管理员不由应用入口自动创建。服务健康后，通过一次性 `docker compose exec -e ADMIN_EMAIL -e ADMIN_PASSWORD backend python -m scripts.create_admin` 运维命令创建或提升管理员；只把变量注入该进程，完成后立即从运维终端清除，禁止把管理员密码保存在 Compose 服务环境或 `.env` 中。
+管理员不由应用入口自动创建。服务健康后，通过一次性 `python -m scripts.create_admin` 运维命令创建或提升管理员；容器使用 `docker compose exec`，原生部署使用对应虚拟环境。只把变量注入该进程，完成后立即从运维终端清除，禁止把管理员密码保存在长期服务环境或 `.env` 中。
 
 普通用户同样由一次性 `python -m scripts.create_user` 运维命令创建。先完成 canonical seed；命令会在用户没有 active/scheduled assignment 时分配默认发布计划，不覆盖已有有效 assignment，也不会在未显式 `--update-password` 时轮换密码。
 
@@ -59,9 +61,9 @@ FastAPI 会将 `services/backend/app/web/` 挂载为同源静态页面 `/web/`�
 
 - 只向反向代理暴露应用端口，公网仅开放 443。
 - 使用现代 TLS、HSTS 与自动证书轮换。
-- Nginx 必须传递 `X-Forwarded-Proto`；Gunicorn/Uvicorn 的 `FORWARDED_ALLOW_IPS` 只配置反向代理的实际来源 IP/网段，不得无条件设为 `*`。自动部署脚本会识别宿主机进入容器时使用的 Docker 网关。
+- Nginx、Caddy 或 IIS 必须传递 `X-Forwarded-Proto`；Gunicorn/Uvicorn 的可信代理范围只配置反向代理的实际来源 IP/网段，不得无条件设为 `*`。Docker 脚本会识别容器网关，原生脚本只信任 loopback。
 - 若由代理传递真实客户端 IP，必须配置可信代理边界；应用默认不会信任任意 `X-Forwarded-For`。
-- MySQL 3306 不映射到公网或宿主机。
+- MySQL 3306 不得向公网开放；只允许后端宿主机或受控内网来源访问。
 
 ## 数据库权限
 
@@ -69,8 +71,8 @@ FastAPI 会将 `services/backend/app/web/` 挂载为同源静态页面 `/web/`�
 
 ## 回滚
 
-优先回滚应用镜像，同时保持向后兼容的数据库迁移。只有确认 downgrade 不会丢数据时才执行 `alembic downgrade -1`。首迁移 downgrade 会删除全部业务表，仅可用于空测试环境，不可用于生产事故回滚。
+优先回滚应用镜像或原生脚本保留的上一发布，同时保持向后兼容的数据库迁移。只有确认 downgrade 不会丢数据时才执行 `alembic downgrade -1`。首迁移 downgrade 会删除全部业务表，仅可用于空测试环境，不可用于生产事故回滚。
 
 ## 监控
 
-采集容器重启、HTTP 5xx/409/429、数据库连接、迁移版本、refresh 重放、登录失败、同步滞后和 change feed 保留窗口。健康检查只返回状态，不包含连接串、版本密钥或内部异常。
+采集进程/容器重启、HTTP 5xx/409/429、数据库连接、迁移版本、refresh 重放、登录失败、同步滞后和 change feed 保留窗口。健康检查只返回状态，不包含连接串、版本密钥或内部异常。

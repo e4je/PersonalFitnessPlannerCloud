@@ -159,6 +159,40 @@ def test_setup_middleware_blocks_business_api_but_keeps_wizard_available(monkeyp
     assert allowed.status_code == 200
 
 
+def test_setup_status_uses_deployment_defaults_without_leaking_configured_host(
+    monkeypatch,
+) -> None:
+    application = FastAPI()
+    application.include_router(setup_api.router, prefix="/api/v1")
+    state = {"configured": False}
+    monkeypatch.setattr(
+        setup_api,
+        "is_database_configured",
+        lambda: state["configured"],
+    )
+    monkeypatch.setattr(settings, "mysql_host", "mysql")
+    monkeypatch.setattr(settings, "mysql_port", 3307)
+    monkeypatch.setattr(settings, "mysql_user", "native_setup")
+
+    with TestClient(application) as client:
+        compose_first_run = client.get("/api/v1/setup/status")
+        settings.mysql_host = "native-db.internal"
+        native_first_run = client.get("/api/v1/setup/status")
+        state["configured"] = True
+        configured = client.get("/api/v1/setup/status")
+
+    assert compose_first_run.status_code == 200
+    assert compose_first_run.json()["default_host"] == "mysql"
+    assert native_first_run.status_code == 200
+    assert native_first_run.json()["default_host"] == "127.0.0.1"
+    assert native_first_run.json()["default_port"] == 3306
+    assert native_first_run.json()["default_username"] == "fitness"
+    assert configured.status_code == 200
+    assert configured.json()["default_host"] == "127.0.0.1"
+    assert configured.json()["default_port"] == 3306
+    assert configured.json()["default_username"] == "fitness"
+
+
 def test_setup_api_initializes_without_returning_credentials(monkeypatch) -> None:
     application = FastAPI()
     application.include_router(setup_api.router, prefix="/api/v1")

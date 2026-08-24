@@ -33,14 +33,20 @@ def _client_key(request: Request) -> str:
 def setup_status(response: Response) -> SetupStatusResponse:
     configured = is_database_configured()
     response.headers["Cache-Control"] = "no-store"
+    # Compose uses the non-sensitive service alias ``mysql`` while native
+    # installs naturally use loopback. Never echo arbitrary environment or
+    # persisted infrastructure identifiers from this anonymous endpoint.
+    default_host = (
+        "mysql"
+        if not configured and settings.mysql_host.strip().casefold() == "mysql"
+        else "127.0.0.1"
+    )
     return SetupStatusResponse(
         configured=configured,
         setup_required=not configured,
         database_name=APPLICATION_DATABASE_NAME,
         token_required=not configured,
-        # This endpoint remains anonymous after setup is complete. Return only
-        # generic form defaults, never configured infrastructure identifiers.
-        default_host="mysql",
+        default_host=default_host,
         default_port=3306,
         default_username="fitness",
     )
