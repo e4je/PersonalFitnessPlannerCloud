@@ -38,6 +38,10 @@ def test_windows_native_deployment_uses_a_restricted_startup_task() -> None:
     assert "*S-1-5-19:(OI)(CI)RX" in installer
     assert "*S-1-5-19:(OI)(CI)M" in installer
     assert "@($dataPath, $logsPath)" in installer
+    assert "$installerFullControl" in installer
+    assert "if (-not (Test-Path -LiteralPath $installMarkerPath -PathType Leaf))" in installer
+    assert "Assert-BackendPortAvailable -BackendPort $Port" in installer
+    assert "Get-NetTCPConnection -State Listen" in installer
     assert "[IO.FileAttributes]::ReparsePoint" in installer
     assert "-UserId 'S-1-5-18'" not in installer
     assert "127.0.0.1" in runner

@@ -118,6 +118,26 @@ function Wait-BackendLiveness {
     return $false
 }
 
+function Assert-BackendPortAvailable {
+    param([Parameter(Mandatory = $true)][int]$BackendPort)
+
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $BackendPort -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) {
+        return
+    }
+
+    $descriptions = foreach ($ownerId in @($listeners.OwningProcess | Sort-Object -Unique)) {
+        $process = Get-Process -Id $ownerId -ErrorAction SilentlyContinue
+        if ($process) {
+            "$($process.ProcessName) (PID $ownerId)"
+        }
+        else {
+            "PID $ownerId"
+        }
+    }
+    throw "后端端口 $BackendPort 已被占用：$($descriptions -join ', ')。请关闭冲突程序，或用 -Port 指定其他空闲端口。"
+}
+
 if ($env:OS -ne 'Windows_NT') {
     throw '此脚本只能在 Windows 上运行。'
 }
@@ -127,6 +147,8 @@ $pipIndexUri = [Uri]$PipIndexUrl
 if (-not $pipIndexUri.IsAbsoluteUri -or $pipIndexUri.Scheme -ne 'https' -or $pipIndexUri.UserInfo) {
     throw 'PipIndexUrl 必须是未内嵌账号或令牌的绝对 HTTPS URL。'
 }
+$installerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$installerFullControl = "*$($installerSid):(OI)(CI)F"
 
 foreach ($requiredPath in @(
     (Join-Path $backendSource 'app\main.py'),
@@ -187,7 +209,9 @@ $installedRunnerPath = Join-Path $serviceDirectory 'run-backend.ps1'
 
 Write-DeployLog "安装目录：$installPath"
 New-Item -ItemType Directory -Path $installPath, $dataPath, $configDirectory, $serviceDirectory, $logsPath -Force | Out-Null
-Set-Content -LiteralPath $installMarkerPath -Value 'Managed by PersonalFitnessPlannerCloud native deploy script.' -Encoding ASCII
+if (-not (Test-Path -LiteralPath $installMarkerPath -PathType Leaf)) {
+    Set-Content -LiteralPath $installMarkerPath -Value 'Managed by PersonalFitnessPlannerCloud native deploy script.' -Encoding ASCII
+}
 
 foreach ($stalePath in @($appNewPath, $venvNewPath)) {
     if (Test-Path -LiteralPath $stalePath) {
@@ -257,6 +281,7 @@ $releaseSwapStarted = $false
 
 try {
     Stop-BackendTask
+    Assert-BackendPortAvailable -BackendPort $Port
 
     foreach ($previousPath in @($appPreviousPath, $venvPreviousPath)) {
         if (Test-Path -LiteralPath $previousPath) {
@@ -291,12 +316,12 @@ try {
     }
 
     Write-DeployLog '限制程序为只读，并仅向 LOCAL SERVICE 开放数据与日志写入权限'
-    & icacls.exe $installPath /inheritance:r /grant:r '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
+    & icacls.exe $installPath /inheritance:r /grant:r $installerFullControl '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw '设置安装目录 ACL 失败。'
     }
     foreach ($writablePath in @($dataPath, $logsPath)) {
-        & icacls.exe $writablePath /inheritance:r /grant:r '*S-1-5-19:(OI)(CI)M' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
+        & icacls.exe $writablePath /inheritance:r /grant:r $installerFullControl '*S-1-5-19:(OI)(CI)M' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "设置可写目录 ACL 失败：$writablePath"
         }
