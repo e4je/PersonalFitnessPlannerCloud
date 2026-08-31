@@ -1,10 +1,10 @@
 # 三端源码交接盘点
 
-盘点日期：2026-08-11（Asia/Shanghai）。原始 `01_Android_APK`、`02_Windows_EXE`、`03_MySQL_Backend` 未移动、未删除；统一副本只包含源码、契约、迁移、测试、脚本和文档。
+首次盘点日期：2026-08-11（Asia/Shanghai）；清理复核日期：2026-08-31。原始 `01_Android_APK`、`02_Windows_EXE`、`03_MySQL_Backend` 的有效源码已逐文件确认全部进入统一仓库，后续更新也只在统一仓库维护。旧源码目录与 `04_Codex_Integration` 工作目录已在复核后删除；原始 Agent 说明保留在 `docs/handoff-specs/`。
 
 ## 输入与统一位置
 
-| 模块 | 原始源码根 | 统一源码根 | 清理策略 |
+| 模块 | 历史源码根（已删除） | 当前唯一源码根 | 迁入时的清理策略 |
 |---|---|---|---|
 | Android | `01_Android_APK/android` | `apps/android` | 排除 APK/AAB、截图、`build/.gradle/.kotlin`、`local.properties` |
 | Windows | `02_Windows_EXE/windows` | `apps/windows` | 排除 EXE、`.packages`、`bin/obj/TestResults/.vs` |
