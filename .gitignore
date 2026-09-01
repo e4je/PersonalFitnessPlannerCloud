@@ -23,6 +23,8 @@
 **/htmlcov/
 
 # Android / Gradle
+/.android-sdk/
+/.tools/
 **/.gradle/
 **/.gradle-user-home/
 **/.gradle-test-cache/
