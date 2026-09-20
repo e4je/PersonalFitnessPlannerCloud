@@ -119,8 +119,8 @@ dependencies {
 
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("com.squareup.retrofit2:converter-moshi:3.0.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:5.5.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
     ksp("com.squareup.moshi:moshi-kotlin-codegen:1.15.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
@@ -128,7 +128,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.room:room-testing:2.8.4")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
-    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
     testImplementation("com.google.truth:truth:1.4.5")
     testImplementation("org.robolectric:robolectric:4.14.1")
 
